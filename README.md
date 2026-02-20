@@ -7,6 +7,23 @@
 [![License: GPL-2.0+](https://img.shields.io/badge/License-GPL--2.0%2B-blue)](https://www.gnu.org/licenses/gpl-2.0.html)
 [![MCP 2025-03-26](https://img.shields.io/badge/MCP-2025--03--26-5A67D8)](https://modelcontextprotocol.io/)
 
+[![Ko-fi](https://img.shields.io/badge/Support_this_project-ff5e5b?logo=ko-fi&logoColor=white)](https://ko-fi.com/renandadalte)
+
+---
+
+## What is this?
+
+**Pro Extended** connects your WordPress site (running [Pro Theme](https://theme.co/pro) / Cornerstone) to AI assistants like **Claude**, **ChatGPT**, **Gemini**, and others via the [Model Context Protocol (MCP)](https://modelcontextprotocol.io/).
+
+In practice, this means you can ask your AI assistant to:
+
+- 📄 **Create pages** with full Cornerstone layouts
+- 🎨 **Read and modify** existing layouts, headers, footers, and global blocks
+- 🔍 **Inspect** element schemas, colors, fonts, and site configuration
+- 💾 **Backup and restore** layouts with zero risk of data loss
+
+No coding experience required — if you can install a WordPress plugin and follow a few configuration steps, you're ready to go.
+
 ---
 
 ## Quick Start
@@ -16,9 +33,27 @@
 - WordPress 6.5+
 - Pro Theme 6.x+ (or a child theme of Pro)
 - PHP 8.1+
-- Composer (for autoloading)
+- Composer (for autoloading — [install guide](https://getcomposer.org/download/))
 
 ### Installation
+
+#### Option A — Upload via WordPress Admin (easiest)
+
+1. [**Download the latest release**](https://github.com/renandadalte/wpdev-pro-extended/archive/refs/heads/main.zip) as a `.zip` file.
+2. In your WordPress admin, go to **Plugins → Add New Plugin → Upload Plugin**.
+3. Select the downloaded `.zip` file and click **Install Now**.
+4. After installation, click **Activate Plugin**.
+5. Connect to your server via SSH or terminal and run:
+
+```bash
+cd wp-content/plugins/wpdev-pro-extended
+composer dump-autoload --optimize
+```
+
+> [!NOTE]
+> The `composer dump-autoload` step is required to generate the PHP autoloader. Without it, the plugin will show an error notice. If you don't have terminal access, ask your hosting provider to run this command for you.
+
+#### Option B — Git Clone (for developers)
 
 ```bash
 # Clone into your plugins directory
@@ -35,24 +70,113 @@ wp plugin activate wpdev-pro-extended
 
 ### Connecting an MCP Client
 
-1. Generate an **Application Password** at *Users → Your Profile → Application Passwords* in WordPress admin.
+To allow your AI assistant to interact with your WordPress site, you need two things:
 
-2. Add the server to your MCP client configuration:
+1. **An Application Password** — Go to your WordPress admin → **Users → Your Profile** → scroll down to **Application Passwords**. Enter a name (e.g., "MCP") and click **Add New Application Password**. Copy the generated password.
 
-```json
-{
-  "mcpServers": {
-    "pro-extended": {
-      "url": "https://your-site.com/wp-json/pro-extended/v1/mcp",
-      "headers": {
-        "Authorization": "Basic <base64(username:application_password)>"
-      }
-    }
-  }
-}
-```
+2. **A Base64-encoded credential string** — The MCP server uses HTTP [Basic Authentication](https://developer.mozilla.org/en-US/docs/Web/HTTP/Authentication#basic_authentication_scheme). You need to encode your `username:password` pair in Base64.
 
-3. Your AI agent can now list elements, read layouts, create pages, and more.
+   **How to generate your Base64 string:**
+
+   ```bash
+   # In your terminal (macOS / Linux):
+   echo -n "your_wp_username:xxxx xxxx xxxx xxxx xxxx xxxx" | base64
+
+   # Example output: eW91cl93cF91c2VybmFtZTp4eHh4IHh4eHggeHh4eCB4eHh4IHh4eHggeHh4eA==
+   ```
+
+   Or use any online Base64 encoder — just encode the string `your_wp_username:your_application_password` (with the colon separator).
+
+3. **Add the server to your IDE's MCP configuration:**
+
+   <details>
+   <summary><strong>Antigravity (Google Gemini)</strong></summary>
+
+   Edit `~/.gemini/antigravity/mcp_config.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "pro-extended": {
+         "serverUrl": "https://your-site.com/wp-json/pro-extended/v1/mcp",
+         "headers": {
+           "Authorization": "Basic YOUR_BASE64_STRING_HERE"
+         }
+       }
+     }
+   }
+   ```
+
+   > **Note**: Antigravity uses `serverUrl` (camelCase) instead of `url`.
+
+   </details>
+
+   <details>
+   <summary><strong>Cursor</strong></summary>
+
+   Edit `.cursor/mcp.json` in your project root (or global settings):
+
+   ```json
+   {
+     "mcpServers": {
+       "pro-extended": {
+         "url": "https://your-site.com/wp-json/pro-extended/v1/mcp",
+         "headers": {
+           "Authorization": "Basic YOUR_BASE64_STRING_HERE"
+         }
+       }
+     }
+   }
+   ```
+
+   </details>
+
+   <details>
+   <summary><strong>Claude Desktop</strong></summary>
+
+   Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+   ```json
+   {
+     "mcpServers": {
+       "pro-extended": {
+         "url": "https://your-site.com/wp-json/pro-extended/v1/mcp",
+         "headers": {
+           "Authorization": "Basic YOUR_BASE64_STRING_HERE"
+         }
+       }
+     }
+   }
+   ```
+
+   </details>
+
+   <details>
+   <summary><strong>VS Code (GitHub Copilot / Other MCP Clients)</strong></summary>
+
+   Edit `.vscode/mcp.json` in your project root:
+
+   ```json
+   {
+     "servers": {
+       "pro-extended": {
+         "url": "https://your-site.com/wp-json/pro-extended/v1/mcp",
+         "headers": {
+           "Authorization": "Basic YOUR_BASE64_STRING_HERE"
+         }
+       }
+     }
+   }
+   ```
+
+   > **Note**: VS Code uses `servers` instead of `mcpServers` as the root key.
+
+   </details>
+
+> [!IMPORTANT]
+> Replace `YOUR_BASE64_STRING_HERE` with the Base64-encoded string you generated in step 2. **Do not paste your username and password directly** — it must be the Base64-encoded version.
+
+4. Restart your IDE. Your AI agent can now list elements, read layouts, create pages, and more.
 
 ### WP-CLI Usage
 
@@ -203,6 +327,14 @@ The plugin handles all three Cornerstone storage formats:
 - **Element Defaults Manager**: Admin UI for setting default values for Cornerstone elements
 - **Color Audit & Replace**: CLI tool to find and replace hardcoded colors with global palette references
 - **Layout Versioning**: Git-friendly JSON export with diff support
+
+---
+
+## Support
+
+If you find this project useful, consider supporting its development:
+
+[![Ko-fi](https://img.shields.io/badge/Buy_me_a_coffee-ff5e5b?logo=ko-fi&logoColor=white&style=for-the-badge)](https://ko-fi.com/renandadalte)
 
 ---
 
