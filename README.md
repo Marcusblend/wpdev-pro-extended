@@ -67,10 +67,13 @@ To allow your AI assistant to interact with your WordPress site, you need two th
    **How to generate your Base64 string:**
 
    ```bash
-   # In your terminal (macOS / Linux):
+   # macOS / Linux:
    echo -n "your_wp_username:xxxx xxxx xxxx xxxx xxxx xxxx" | base64
+   ```
 
-   # Example output: eW91cl93cF91c2VybmFtZTp4eHh4IHh4eHggeHh4eCB4eHh4IHh4eHggeHh4eA==
+   ```powershell
+   # Windows (PowerShell):
+   [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("your_wp_username:xxxx xxxx xxxx xxxx xxxx xxxx"))
    ```
 
    Or use any online Base64 encoder — just encode the string `your_wp_username:your_application_password` (with the colon separator).
