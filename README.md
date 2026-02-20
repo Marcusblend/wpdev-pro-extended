@@ -33,7 +33,6 @@ No coding experience required — if you can install a WordPress plugin and foll
 - WordPress 6.5+
 - Pro Theme 6.x+ (or a child theme of Pro)
 - PHP 8.1+
-- Composer (for autoloading — [install guide](https://getcomposer.org/download/))
 
 ### Installation
 
@@ -43,15 +42,8 @@ No coding experience required — if you can install a WordPress plugin and foll
 2. In your WordPress admin, go to **Plugins → Add New Plugin → Upload Plugin**.
 3. Select the downloaded `.zip` file and click **Install Now**.
 4. After installation, click **Activate Plugin**.
-5. Connect to your server via SSH or terminal and run:
 
-```bash
-cd wp-content/plugins/wpdev-pro-extended
-composer dump-autoload --optimize
-```
-
-> [!NOTE]
-> The `composer dump-autoload` step is required to generate the PHP autoloader. Without it, the plugin will show an error notice. If you don't have terminal access, ask your hosting provider to run this command for you.
+That's it — no terminal, no extra steps. The plugin includes a built-in autoloader.
 
 #### Option B — Git Clone (for developers)
 
@@ -59,10 +51,6 @@ composer dump-autoload --optimize
 # Clone into your plugins directory
 cd wp-content/plugins/
 git clone https://github.com/renandadalte/wpdev-pro-extended.git
-
-# Generate the autoloader
-cd wpdev-pro-extended
-composer dump-autoload --optimize
 
 # Activate via WP-CLI
 wp plugin activate wpdev-pro-extended
@@ -242,8 +230,7 @@ wp pe layout restore 42                                 # Restore from backup
 
 ```
 wpdev-pro-extended/
-├── wpdev-pro-extended.php       # Bootstrap, Pro Theme dependency guard
-├── composer.json                # PSR-4 autoloading (ProExtended\ → src/)
+├── wpdev-pro-extended.php       # Bootstrap, Pro Theme dependency guard, PSR-4 autoloader
 └── src/
     ├── Plugin.php               # Service container (lazy-loaded)
     ├── Layouts/

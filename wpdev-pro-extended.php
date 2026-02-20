@@ -27,19 +27,21 @@ define('PE_DIR', plugin_dir_path(__FILE__));
 define('PE_URL', plugin_dir_url(__FILE__));
 define('PE_BASENAME', plugin_basename(__FILE__));
 
-// ─── Autoloader ──────────────────────────────────────────────────────────────
-$autoloader = PE_DIR . 'vendor/autoload.php';
+// ─── Autoloader (built-in PSR-4) ─────────────────────────────────────────────
+spl_autoload_register(function (string $class): void {
+    $prefix = 'ProExtended\\';
 
-if (! file_exists($autoloader)) {
-    add_action('admin_notices', function (): void {
-        echo '<div class="notice notice-error"><p>';
-        echo esc_html__('Pro Extended: Composer autoloader not found. Run `composer dump-autoload` in the plugin directory.', 'wpdev-pro-extended');
-        echo '</p></div>';
-    });
-    return;
-}
+    if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
+        return;
+    }
 
-require_once $autoloader;
+    $relativeClass = substr($class, strlen($prefix));
+    $file = PE_DIR . 'src/' . str_replace('\\', '/', $relativeClass) . '.php';
+
+    if (file_exists($file)) {
+        require_once $file;
+    }
+});
 
 // ─── Theme Dependency Guard ──────────────────────────────────────────────────
 

@@ -48,3 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Layout rendering**: `LayoutService.save()` now sets `_cornerstone_settings` meta (layout/header/footer defaults) — required for Cornerstone to recognize pages
 - **Layout rendering**: `LayoutService.save()` now sets `_wp_page_template` to `template-blank-4.php` — required for Pro theme rendering
 - **Validation crash**: `HierarchyValidator.validateParentChild()` now handles wildcard `"*"` in `valid_children` (was passing string to `in_array()`)
+
+### Changed
+
+- **Autoloader**: Replaced Composer dependency with a built-in PSR-4 autoloader — plugin now works immediately after activation, no terminal access required
