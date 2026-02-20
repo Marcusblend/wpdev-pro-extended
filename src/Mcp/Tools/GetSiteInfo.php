@@ -1,0 +1,74 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ProExtended\Mcp\Tools;
+
+final class GetSiteInfo implements ToolInterface
+{
+    public function name(): string
+    {
+        return 'get_site_info';
+    }
+
+    public function description(): string
+    {
+        return 'Get WordPress site information including versions, theme details, breakpoint configuration, and active plugins.';
+    }
+
+    public function inputSchema(): array
+    {
+        return [
+            'type'       => 'object',
+            'properties' => (object) [],
+        ];
+    }
+
+    public function execute(array $arguments): mixed
+    {
+        $theme = wp_get_theme();
+
+        // Breakpoint configuration.
+        $bpBase = (int) get_option('x_breakpoint_base', 4);
+        $bpRanges = get_option('x_breakpoint_ranges', []);
+
+        // Active plugins (names only, no paths).
+        $activePlugins = get_option('active_plugins', []);
+        $pluginNames = [];
+        foreach ($activePlugins as $plugin) {
+            $pluginData = get_plugin_data(WP_PLUGIN_DIR . '/' . $plugin, false, false);
+            $pluginNames[] = $pluginData['Name'] ?? basename($plugin, '.php');
+        }
+
+        return [
+            'site_url'        => get_site_url(),
+            'home_url'        => get_home_url(),
+            'wordpress'       => get_bloginfo('version'),
+            'php'             => phpversion(),
+            'theme'           => [
+                'name'     => $theme->get('Name'),
+                'version'  => $theme->get('Version'),
+                'template' => $theme->get_template(),
+                'is_child' => $theme->get_template() !== $theme->get_stylesheet(),
+            ],
+            'cornerstone'     => [
+                'available'  => function_exists('cornerstone'),
+                'version'    => defined('CS_VERSION') ? CS_VERSION : null,
+            ],
+            'pro_extended'    => [
+                'version' => PE_VERSION,
+            ],
+            'breakpoints'     => [
+                'base'   => $bpBase,
+                'ranges' => $bpRanges,
+                'total'  => $bpBase + 1,
+            ],
+            'active_plugins'  => $pluginNames,
+        ];
+    }
+
+    public function requiredCapability(): string
+    {
+        return 'edit_posts';
+    }
+}

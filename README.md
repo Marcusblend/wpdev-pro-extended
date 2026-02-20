@@ -1,0 +1,223 @@
+# Pro Extended (PE)
+
+> Extends [Pro Theme](https://theme.co/pro) and Cornerstone page builder with an **MCP Server**, developer tools, and CLI commands — enabling AI agents to read, create, and manage Cornerstone layouts programmatically.
+
+[![PHP 8.1+](https://img.shields.io/badge/PHP-8.1%2B-777BB4?logo=php&logoColor=white)](https://www.php.net/)
+[![WordPress 6.5+](https://img.shields.io/badge/WordPress-6.5%2B-21759B?logo=wordpress&logoColor=white)](https://wordpress.org/)
+[![License: GPL-2.0+](https://img.shields.io/badge/License-GPL--2.0%2B-blue)](https://www.gnu.org/licenses/gpl-2.0.html)
+[![MCP 2025-03-26](https://img.shields.io/badge/MCP-2025--03--26-5A67D8)](https://modelcontextprotocol.io/)
+
+---
+
+## Quick Start
+
+### Requirements
+
+- WordPress 6.5+
+- Pro Theme 6.x+ (or a child theme of Pro)
+- PHP 8.1+
+- Composer (for autoloading)
+
+### Installation
+
+```bash
+# Clone into your plugins directory
+cd wp-content/plugins/
+git clone https://github.com/renandadalte/wpdev-pro-extended.git
+
+# Generate the autoloader
+cd wpdev-pro-extended
+composer dump-autoload --optimize
+
+# Activate via WP-CLI
+wp plugin activate wpdev-pro-extended
+```
+
+### Connecting an MCP Client
+
+1. Generate an **Application Password** at *Users → Your Profile → Application Passwords* in WordPress admin.
+
+2. Add the server to your MCP client configuration:
+
+```json
+{
+  "mcpServers": {
+    "pro-extended": {
+      "url": "https://your-site.com/wp-json/pro-extended/v1/mcp",
+      "headers": {
+        "Authorization": "Basic <base64(username:application_password)>"
+      }
+    }
+  }
+}
+```
+
+3. Your AI agent can now list elements, read layouts, create pages, and more.
+
+### WP-CLI Usage
+
+```bash
+wp pe mcp test                                          # Verify MCP server
+wp pe mcp tools                                         # List all 14 tools
+wp pe mcp call get_site_info --user=1                   # Call any tool
+wp pe layout list                                       # List all layouts
+wp pe layout export 42 --output=homepage.json           # Export layout to JSON
+wp pe layout backup 42                                  # Create backup
+wp pe layout restore 42                                 # Restore from backup
+```
+
+---
+
+## Capabilities
+
+### MCP Tools (14)
+
+| Tool | Type | Description |
+|------|------|-------------|
+| `list_elements` | Read | List all Cornerstone element types with groups and valid children |
+| `get_element_schema` | Read | Get full schema for a specific element type (properties, defaults, options) |
+| `list_layouts` | Read | List all layouts (pages, headers, footers, global blocks, etc.) |
+| `get_layout` | Read | Get complete layout JSON with metadata and checksum |
+| `validate_layout` | Read | Validate layout structure against element schema and hierarchy rules |
+| `list_colors` | Read | Get the Cornerstone global color palette |
+| `list_fonts` | Read | Get registered font definitions and configuration |
+| `get_site_info` | Read | Get WordPress, theme, Cornerstone versions and breakpoint config |
+| `create_page` | Write | Create a new page with optional Cornerstone layout data |
+| `deploy_layout` | Write | Write layout data to a post (auto-backup + validation) |
+| `backup_layout` | Write | Create a timestamped backup (up to 10 per post) |
+| `restore_layout` | Write | Restore from a backup |
+| `clear_cache` | Write | Clear Cornerstone TSS cache (per-post or global) |
+| `update_layout` | Write | Apply patch operations (add/remove/update elements) |
+
+### MCP Resources (3)
+
+| URI | Description |
+|-----|-------------|
+| `pe://schema/elements` | Full element definitions (cached) |
+| `pe://schema/hierarchy` | Valid parent-child relationship map |
+| `pe://colors/palette` | Current color palette |
+
+### WP-CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `wp pe layout list` | List all Cornerstone layouts |
+| `wp pe layout export <id>` | Export layout to JSON file |
+| `wp pe layout import <file>` | Import layout from JSON file |
+| `wp pe layout backup <id>` | Create layout backup |
+| `wp pe layout restore <id>` | Restore layout from backup |
+| `wp pe mcp test` | Verify MCP server is operational |
+| `wp pe mcp tools` | List registered MCP tools |
+| `wp pe mcp call <tool>` | Call a tool directly |
+
+---
+
+## Architecture
+
+### Plugin Structure
+
+```
+wpdev-pro-extended/
+├── wpdev-pro-extended.php       # Bootstrap, Pro Theme dependency guard
+├── composer.json                # PSR-4 autoloading (ProExtended\ → src/)
+└── src/
+    ├── Plugin.php               # Service container (lazy-loaded)
+    ├── Layouts/
+    │   └── LayoutService.php    # Read/write/backup/restore for 3 storage formats
+    ├── Elements/
+    │   ├── SchemaExtractor.php  # Wraps cornerstone('Elements') with transient cache
+    │   ├── HierarchyValidator.php  # Layout validation engine
+    │   └── ValidationResult.php
+    ├── Mcp/
+    │   ├── Server.php           # JSON-RPC 2.0 router
+    │   ├── Transport/
+    │   │   └── StreamableHttp.php  # REST API endpoint (POST)
+    │   ├── Tools/               # 14 tool implementations
+    │   │   ├── ToolInterface.php
+    │   │   ├── ListElements.php
+    │   │   ├── GetElementSchema.php
+    │   │   ├── ...
+    │   │   └── UpdateLayout.php
+    │   └── Resources/           # 3 resource implementations
+    │       ├── ResourceInterface.php
+    │       ├── ElementSchemaResource.php
+    │       ├── HierarchyResource.php
+    │       └── ColorPaletteResource.php
+    └── Commands/
+        ├── LayoutCommand.php    # wp pe layout *
+        └── McpCommand.php       # wp pe mcp *
+```
+
+### MCP Protocol
+
+The server implements [MCP 2025-03-26](https://modelcontextprotocol.io/) via **Streamable HTTP** transport:
+
+- **Endpoint**: `POST /wp-json/pro-extended/v1/mcp`
+- **Protocol**: JSON-RPC 2.0
+- **Authentication**: WordPress Application Passwords (Basic Auth)
+- **Capability checks**: Per-tool (`edit_posts` for reads, `manage_options` for writes)
+
+### Cornerstone Data Handling
+
+The plugin handles all three Cornerstone storage formats:
+
+| Post Type | Storage | Format |
+|-----------|---------|--------|
+| `page`, `post` | `_cornerstone_data` meta | Inline tree (nested `_modules`) |
+| `cs_header`, `cs_footer`, `cs_layout_*` | `post_content` | Inline tree with regions |
+| `cs_global_block` | `post_content` | Flat map (keyed by `_id`) |
+
+**Critical safety patterns** applied:
+- **`wp_slash(wp_json_encode($data))`** before `update_post_meta()` — prevents WordPress from corrupting JSON escaping
+- **`$wpdb` for raw backups** — preserves exact byte-level encoding
+- **`_bp_data` validation** — ensures breakpoint arrays are sequential (5-element, null-padded) to prevent `TypeError: t[i] is not iterable` in Cornerstone's React app
+
+### Security
+
+- All endpoints require WordPress authentication (Application Passwords)
+- Read tools require `edit_posts` capability
+- Write tools require `manage_options` capability
+- Input validation on all tool parameters
+- Layout structure validation before writes
+- Auto-backup before destructive operations
+- Zero external dependencies — portable, no supply chain risk
+
+---
+
+## Roadmap
+
+### ✅ v1.0.0-alpha (Current)
+- MCP Server with Streamable HTTP transport
+- 14 tools (8 read + 6 write) for element/layout management
+- 3 MCP resources for schema and palette data
+- WP-CLI commands for layout management and MCP testing
+- Layout backup/restore system
+- Hierarchy and breakpoint data validation
+
+### 🔜 v1.1 — Design Tokens & Settings Sync
+- **Design Token System**: Centralized token registry, CSS custom property output, admin UI
+- **Settings Sync**: ACF-style JSON export/import for version-controlled settings
+- **MCP rate limiting**: Transient-based request throttling
+
+### 🔮 v1.2 — Extended Features
+- **Element Defaults Manager**: Admin UI for setting default values for Cornerstone elements
+- **Color Audit & Replace**: CLI tool to find and replace hardcoded colors with global palette references
+- **Layout Versioning**: Git-friendly JSON export with diff support
+
+---
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/my-feature`)
+3. Commit your changes (`git commit -m 'feat: add my feature'`)
+4. Push to the branch (`git push origin feature/my-feature`)
+5. Open a Pull Request
+
+Please follow [Conventional Commits](https://www.conventionalcommits.org/) for commit messages.
+
+---
+
+## License
+
+This project is licensed under the [GPL-2.0-or-later](https://www.gnu.org/licenses/gpl-2.0.html) license.
