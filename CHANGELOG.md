@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-15
+
+### Fixed
+
+- **Validator failed open (introduced in 1.0.2)**: the new envelope resolution treated any shape it did not recognise as `valid: true` with zero errors, so `deploy_layout` wrote payloads that 1.0.0-alpha correctly rejected — including the sparse `_bp_data` that causes `TypeError: t[i] is not iterable` in Cornerstone's editor. An associative `{ id: element }` map is now validated as a flat element map instead of being waved through, and `skip_validation` remains the deliberate way to bypass checking. A validator that passes what it cannot read is worse than no validator
+- **Validation warnings were discarded**: `deploy_layout` read only `valid` and dropped the warning list on the success path, so a fallback or partial validation never reached the caller. Warnings are now merged into the response's `warnings` array
+
 ## [1.0.2] - 2026-09-15
 
 ### Fixed

@@ -74,20 +74,31 @@ final class DeployLayout implements ToolInterface
         $context = ($post->post_type === 'cs_global_block') ? 'flat' : 'inline';
 
         // Validate layout data.
+        $backupId = null;
+        $warnings = [];
+
         if (! $skipValidation) {
             $validation = $this->validator->validate($layoutData, $context);
 
             if (! $validation->valid) {
                 return [
                     'deployed'   => false,
+                    'post_id'    => $postId,
+                    'backup_id'  => null,
+                    'warnings'   => $warnings,
                     'validation' => $validation->toArray(),
                 ];
+            }
+
+            // Carry warnings through to the caller. A validation that fell back
+            // to a different reading of the data, or that flagged a suspect
+            // parent/child pairing, must not vanish just because it passed.
+            foreach ($validation->warnings as $warning) {
+                $warnings[] = $warning;
             }
         }
 
         // Create backup.
-        $backupId = null;
-        $warnings = [];
 
         if (! $skipBackup) {
             try {

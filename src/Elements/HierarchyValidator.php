@@ -50,11 +50,17 @@ final class HierarchyValidator
         $regions = $this->extractRegions($data);
 
         if ($regions === null) {
-            // An envelope we do not recognise. Never block a write on a shape
-            // we cannot read — report it and let the caller decide.
-            return new ValidationResult(true, [], [
-                'Unrecognised layout envelope; structural validation was skipped.',
-            ]);
+            // Not a list, not a regions envelope, not a single element — almost
+            // always an { id: element } map, so validate it as one. Passing data
+            // we could not read is worse than having no validator at all: the
+            // caller acts on `valid`, and an agent emitting a JSON object where a
+            // list belongs is the ordinary way to arrive here. `skip_validation`
+            // remains the deliberate escape hatch.
+            $warnings[] = 'Layout envelope not recognised; validated as a flat element map.';
+
+            $this->validateFlatMap($data, $errors, $warnings);
+
+            return new ValidationResult(empty($errors), $errors, $warnings);
         }
 
         foreach ($regions as $name => $tree) {
