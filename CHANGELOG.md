@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Validation rejected headers, footers and layout templates**: `HierarchyValidator` assumed a bare element list, but `cs_header`, `cs_footer` and `cs_layout_*` wrap their trees in a `regions` envelope and `cs_global_block` may nest its map under `elements`. The validator treated the envelope key as an element and failed every one of those post types — which made `deploy_layout` unable to write them. It now resolves all three storage shapes, reports errors per region, and skips (with a warning, never a hard failure) any envelope it does not recognise, so an unknown shape can't block a write
+
 - **Backup corruption (data loss)**: `LayoutService::backup()` wrote the backup array through `update_post_meta()` without `wp_slash()`. `update_metadata()` applies `wp_unslash()` recursively, stripping the escaping out of the stored JSON — so any layout containing a non-ASCII character, a quote, or a URL was written to the backup unparseable, and `restore_layout` then wrote that broken JSON back to the post
 - **Restore left pages half-restored**: `LayoutService::restore()` wrote `_cornerstone_data` via `$wpdb` without invalidating the meta cache (stale reads on sites with a persistent object cache) and without recompiling `post_content`, so the front end kept rendering the *previous* layout while the builder showed the restored one. It also silently no-opped when the meta row did not exist
 - **Cornerstone false negative**: the availability check ran on `plugins_loaded`, but WordPress loads themes *after* that hook — so the "Cornerstone is not available" notice appeared on every request even when Cornerstone was working. Moved to `admin_init` and the message no longer claims features are disabled, which was never true
@@ -24,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **`update_layout` is now atomic**: operations are applied in memory and the layout is written only if *all* of them succeed — previously a partial application was saved and reported success with the errors nested inside
-- **`update_layout` now validates**: the patched result is checked before writing (`skip_validation` opts out), closing the path by which patch operations could write the sparse `_bp_data` that crashes Cornerstone's editor
+- **`update_layout` now validates**: the patched result is checked before writing (`skip_validation` opts out), closing the path by which patch operations could write the sparse `_bp_data` that crashes Cornerstone's editor. Validation only blocks when the patch is what broke the layout — if the stored data was already invalid the write proceeds with a warning, so the tool can still be used to repair it
+- **`update_layout` returns one consistent shape**: every exit point returns the same keys (`updated`, `post_id`, `backup_id`, `operations_applied`, `operations_total`, `validation`, `warnings`, `errors`) instead of three different key sets, and a failed write now says so in `errors` rather than reporting `updated: false` with no reason
+- **`restore()` checks its database writes**: the return values of `$wpdb->update()`/`$wpdb->insert()` were discarded and the method returned `true` unconditionally, so a failed restore reported success
 - **Backup failures are reported**: `deploy_layout` and `update_layout` return a `warnings` array instead of silently discarding a failed backup
 
 ## [1.0.0-alpha] - 2026-02-20

@@ -223,7 +223,7 @@ final class LayoutService
             ));
 
             if ($exists > 0) {
-                $wpdb->update(
+                $written = $wpdb->update(
                     $wpdb->postmeta,
                     ['meta_value' => $rawData],
                     ['post_id' => $postId, 'meta_key' => '_cornerstone_data'],
@@ -231,7 +231,7 @@ final class LayoutService
                     ['%d', '%s']
                 );
             } else {
-                $wpdb->insert(
+                $written = $wpdb->insert(
                     $wpdb->postmeta,
                     [
                         'post_id'    => $postId,
@@ -240,6 +240,17 @@ final class LayoutService
                     ],
                     ['%d', '%s', '%s']
                 );
+            }
+
+            // Only `false` means the query failed; 0 just means the stored value
+            // was already identical. Reporting success on a failed write is how a
+            // restore silently does nothing.
+            if ($written === false) {
+                throw new \RuntimeException(sprintf(
+                    'Failed to restore _cornerstone_data for post %d: %s',
+                    $postId,
+                    $wpdb->last_error !== '' ? $wpdb->last_error : 'unknown database error'
+                ));
             }
 
             // $wpdb bypasses the object cache, so the old value would keep being
@@ -251,13 +262,22 @@ final class LayoutService
             // layout on the front end while the builder shows the restored one.
             $this->renderToPostContent($postId);
         } else {
-            $wpdb->update(
+            $written = $wpdb->update(
                 $wpdb->posts,
                 ['post_content' => $rawData],
                 ['ID' => $postId],
                 ['%s'],
                 ['%d']
             );
+
+            if ($written === false) {
+                throw new \RuntimeException(sprintf(
+                    'Failed to restore post_content for post %d: %s',
+                    $postId,
+                    $wpdb->last_error !== '' ? $wpdb->last_error : 'unknown database error'
+                ));
+            }
+
             clean_post_cache($postId);
         }
 

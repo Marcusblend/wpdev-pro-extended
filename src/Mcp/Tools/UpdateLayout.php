@@ -78,7 +78,6 @@ final class UpdateLayout implements ToolInterface
             throw new \InvalidArgumentException('At least one operation is required.');
         }
 
-        // Get current layout data.
         $envelope = $this->layouts->get($postId);
         $data = $envelope['data'];
 
@@ -88,12 +87,14 @@ final class UpdateLayout implements ToolInterface
             );
         }
 
+        $total    = count($operations);
+        $original = $data;
+        $errors   = [];
+        $warnings = [];
+
         // Apply every operation to an in-memory copy first. Nothing is written
         // unless all of them succeed, so a failed patch can never leave a
         // half-applied element tree on the post.
-        $total  = count($operations);
-        $errors = [];
-
         foreach ($operations as $index => $op) {
             if (! is_array($op)) {
                 $errors[] = sprintf('Operation %s is not an object.', (string) $index);
@@ -101,8 +102,8 @@ final class UpdateLayout implements ToolInterface
             }
 
             $opType = $op['op'] ?? '';
-            $path = $op['path'] ?? '';
-            $value = $op['value'] ?? null;
+            $path   = $op['path'] ?? '';
+            $value  = $op['value'] ?? null;
 
             try {
                 match ($opType) {
@@ -117,36 +118,45 @@ final class UpdateLayout implements ToolInterface
         }
 
         if (! empty($errors)) {
-            return [
-                'updated'            => false,
-                'post_id'            => $postId,
-                'operations_applied' => 0,
-                'operations_total'   => $total,
-                'errors'             => $errors,
-            ];
+            return $this->result($postId, false, 0, $total, null, $warnings, $errors, null);
         }
 
         // Validate the patched result before it reaches the database. Patch
-        // operations can just as easily produce sparse `_bp_data` as a full
-        // deploy can, which crashes Cornerstone's editor.
+        // operations can produce the sparse `_bp_data` that crashes Cornerstone's
+        // editor just as easily as a full deploy can.
+        $validation = null;
+
         if (! $skipValidation) {
             $post = get_post($postId);
             $context = ($post && $post->post_type === 'cs_global_block') ? 'flat' : 'inline';
-            $validation = $this->validator->validate($data, $context);
 
-            if (! $validation->valid) {
-                return [
-                    'updated'            => false,
-                    'post_id'            => $postId,
-                    'operations_applied' => 0,
-                    'operations_total'   => $total,
-                    'validation'         => $validation->toArray(),
-                ];
+            $after = $this->validator->validate($data, $context);
+            $validation = $after->toArray();
+
+            if (! $after->valid) {
+                // Only block when this patch is what broke the layout. If the
+                // stored data was already invalid, refusing to write would make
+                // the tool unable to repair it.
+                $before = $this->validator->validate($original, $context);
+
+                if ($before->valid) {
+                    return $this->result(
+                        $postId,
+                        false,
+                        0,
+                        $total,
+                        null,
+                        $warnings,
+                        ['Patched layout failed validation; nothing was written.'],
+                        $validation
+                    );
+                }
+
+                $warnings[] = 'Layout is still invalid, but it was already invalid before this patch — writing anyway.';
             }
         }
 
         $backupId = null;
-        $warnings = [];
 
         try {
             $backupId = $this->layouts->backup($postId);
@@ -156,14 +166,52 @@ final class UpdateLayout implements ToolInterface
 
         $saved = $this->layouts->save($postId, $data);
 
+        if (! $saved) {
+            $errors[] = sprintf('Writing the patched layout to post %d failed.', $postId);
+        }
+
+        return $this->result(
+            $postId,
+            $saved,
+            $saved ? $total : 0,
+            $total,
+            $backupId,
+            $warnings,
+            $errors,
+            $validation
+        );
+    }
+
+    /**
+     * Build the tool's response.
+     *
+     * Every exit point returns the same keys so a caller never has to guess
+     * which shape it got.
+     *
+     * @param  string[]                  $warnings
+     * @param  string[]                  $errors
+     * @param  array<string, mixed>|null $validation
+     * @return array<string, mixed>
+     */
+    private function result(
+        int $postId,
+        bool $updated,
+        int $applied,
+        int $total,
+        ?string $backupId,
+        array $warnings,
+        array $errors,
+        ?array $validation
+    ): array {
         return [
-            'updated'            => $saved,
+            'updated'            => $updated,
             'post_id'            => $postId,
             'backup_id'          => $backupId,
-            'operations_applied' => $saved ? $total : 0,
+            'operations_applied' => $applied,
             'operations_total'   => $total,
+            'validation'         => $validation,
             'warnings'           => $warnings,
-            'errors'             => [],
+            'errors'             => $errors,
         ];
     }
 

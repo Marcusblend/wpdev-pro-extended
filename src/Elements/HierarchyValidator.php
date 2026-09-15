@@ -33,12 +33,94 @@ final class HierarchyValidator
         }
 
         if ($context === 'flat') {
-            $this->validateFlatMap($data, $errors, $warnings);
-        } else {
-            $this->validateTree($data, $errors, $warnings, null);
+            // Global blocks are a flat map, sometimes nested under `elements`.
+            $elements = (isset($data['elements']) && is_array($data['elements']))
+                ? $data['elements']
+                : $data;
+
+            $this->validateFlatMap($elements, $errors, $warnings);
+
+            return new ValidationResult(empty($errors), $errors, $warnings);
+        }
+
+        // Pages store a bare element list, but headers, footers and layout
+        // templates wrap their trees in named regions. Feeding an envelope
+        // straight to validateTree() treats "regions" as an element and fails
+        // every layout post type, so resolve the shape first.
+        $regions = $this->extractRegions($data);
+
+        if ($regions === null) {
+            // An envelope we do not recognise. Never block a write on a shape
+            // we cannot read — report it and let the caller decide.
+            return new ValidationResult(true, [], [
+                'Unrecognised layout envelope; structural validation was skipped.',
+            ]);
+        }
+
+        foreach ($regions as $name => $tree) {
+            $regionErrors = [];
+            $regionWarnings = [];
+
+            $this->validateTree($tree, $regionErrors, $regionWarnings, null);
+
+            $prefix = $name === '' ? '' : sprintf('Region "%s": ', $name);
+
+            foreach ($regionErrors as $error) {
+                $errors[] = $prefix . $error;
+            }
+
+            foreach ($regionWarnings as $warning) {
+                $warnings[] = $prefix . $warning;
+            }
         }
 
         return new ValidationResult(empty($errors), $errors, $warnings);
+    }
+
+    /**
+     * Resolve a stored document into the element lists it contains.
+     *
+     * Returns a map of region name (empty string for a bare tree) to element
+     * list, or null when the shape is not recognised.
+     *
+     * @param  array<mixed> $data
+     * @return array<string, array<int, mixed>>|null
+     */
+    private function extractRegions(array $data): ?array
+    {
+        // A bare element list — pages, and any region handed to us directly.
+        if (array_is_list($data)) {
+            return ['' => $data];
+        }
+
+        // Headers, footers, layout templates: { regions: { name: [...] } }.
+        if (isset($data['regions']) && is_array($data['regions'])) {
+            $regions = [];
+
+            foreach ($data['regions'] as $name => $region) {
+                if (! is_array($region)) {
+                    continue;
+                }
+
+                if (array_is_list($region)) {
+                    $regions[(string) $name] = $region;
+                } elseif (isset($region['_modules']) && is_array($region['_modules'])) {
+                    // The region is itself an element carrying children.
+                    $regions[(string) $name] = [$region];
+                } else {
+                    $regions[(string) $name] = [$region];
+                }
+            }
+
+            return $regions;
+        }
+
+        // A single element object.
+        if (isset($data['_type'])) {
+            return ['' => [$data]];
+        }
+
+        return null;
     }
 
     /**
