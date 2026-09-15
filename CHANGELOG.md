@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-15
+
+### Fixed
+
+- **`list_layouts` hid every header, footer and global block**: Cornerstone stores layout documents under its own `tco-data` post status, but `LayoutService::listAll()` filtered on `['publish', 'draft', 'private']`, so all of them were excluded — a site with two headers and a footer reported `count: 0` for `cs_header`. The query now derives its status list from `get_post_stati()` minus the internal statuses (`trash`, `auto-draft`, `inherit`), which also picks up custom statuses registered later. `get_layout` could read these documents by ID the whole time; only discovery was broken
+
 ## [1.0.3] - 2026-09-15
 
 ### Fixed

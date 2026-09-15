@@ -307,7 +307,7 @@ final class LayoutService
         if (! empty($layoutTypes)) {
             $posts = get_posts([
                 'post_type'      => $layoutTypes,
-                'post_status'    => ['publish', 'draft', 'private'],
+                'post_status'    => $this->listableStatuses(),
                 'posts_per_page' => -1,
                 'orderby'        => 'title',
                 'order'          => 'ASC',
@@ -330,7 +330,7 @@ final class LayoutService
         if (! empty($contentTypes)) {
             $posts = get_posts([
                 'post_type'      => $contentTypes,
-                'post_status'    => ['publish', 'draft', 'private'],
+                'post_status'    => $this->listableStatuses(),
                 'posts_per_page' => -1,
                 'meta_key'       => '_cornerstone_data',
                 'meta_compare'   => 'EXISTS',
@@ -353,6 +353,24 @@ final class LayoutService
     }
 
     // ─── Internal ────────────────────────────────────────────────────────────
+
+    /**
+     * Post statuses worth listing.
+     *
+     * Cornerstone keeps headers, footers and global blocks under its own
+     * `tco-data` status, so a hardcoded publish/draft/private filter silently
+     * hides every layout document on the site. Ask WordPress which statuses are
+     * registered instead, minus the internal ones that never denote a live
+     * document — that also picks up custom statuses added later.
+     *
+     * @return string[]
+     */
+    private function listableStatuses(): array
+    {
+        $statuses = array_keys(get_post_stati());
+
+        return array_values(array_diff($statuses, ['trash', 'auto-draft', 'inherit']));
+    }
 
     /**
      * Build a backup ID that does not collide with an existing one.
