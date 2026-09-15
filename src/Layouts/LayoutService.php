@@ -21,6 +21,11 @@ namespace ProExtended\Layouts;
 final class LayoutService
 {
     /**
+     * Maximum number of backups retained per post.
+     */
+    public const MAX_BACKUPS = 10;
+
+    /**
      * Cornerstone layout post types.
      */
     public const LAYOUT_POST_TYPES = [
@@ -116,9 +121,15 @@ final class LayoutService
         /** @var \wpdb $wpdb */
         global $wpdb;
 
-        $post   = get_post($postId);
+        $post = get_post($postId);
+
+        if (! $post) {
+            throw new \InvalidArgumentException(
+                sprintf('Post %d does not exist.', $postId)
+            );
+        }
+
         $source = $this->detectSource($post);
-        $backupId = (string) time();
 
         if ($source === 'post_meta') {
             // Read raw meta value via $wpdb to preserve exact encoding.
@@ -130,10 +141,18 @@ final class LayoutService
             $rawData = $post->post_content;
         }
 
+        if ($rawData === null || $rawData === '') {
+            throw new \RuntimeException(
+                sprintf('No Cornerstone data to back up for post %d.', $postId)
+            );
+        }
+
         $backups = get_post_meta($postId, '_pe_layout_backups', true);
         if (! is_array($backups)) {
             $backups = [];
         }
+
+        $backupId = $this->uniqueBackupId($backups);
 
         $backups[$backupId] = [
             'source'     => $source,
@@ -141,12 +160,15 @@ final class LayoutService
             'created_at' => gmdate('c'),
         ];
 
-        // Keep only the latest 10 backups.
-        if (count($backups) > 10) {
-            $backups = array_slice($backups, -10, null, true);
+        // Keep only the most recent backups.
+        if (count($backups) > self::MAX_BACKUPS) {
+            $backups = array_slice($backups, -self::MAX_BACKUPS, null, true);
         }
 
-        update_post_meta($postId, '_pe_layout_backups', $backups);
+        // CRITICAL: update_post_meta() runs wp_unslash() over the value, which
+        // strips the escaping out of the raw JSON held in each backup and makes
+        // it unparseable on restore. wp_slash() cancels that out.
+        update_post_meta($postId, '_pe_layout_backups', wp_slash($backups));
 
         return $backupId;
     }
@@ -161,6 +183,12 @@ final class LayoutService
         /** @var \wpdb $wpdb */
         global $wpdb;
 
+        if (! get_post($postId)) {
+            throw new \InvalidArgumentException(
+                sprintf('Post %d does not exist.', $postId)
+            );
+        }
+
         $backups = get_post_meta($postId, '_pe_layout_backups', true);
 
         if (! is_array($backups) || empty($backups)) {
@@ -171,7 +199,7 @@ final class LayoutService
 
         if ($backupId === null) {
             // Use the latest backup.
-            $backupId = array_key_last($backups);
+            $backupId = (string) array_key_last($backups);
         }
 
         if (! isset($backups[$backupId])) {
@@ -185,14 +213,43 @@ final class LayoutService
         $source  = $backup['source'];
 
         if ($source === 'post_meta') {
-            // Write directly via $wpdb to preserve exact encoding.
-            $wpdb->update(
-                $wpdb->postmeta,
-                ['meta_value' => $rawData],
-                ['post_id' => $postId, 'meta_key' => '_cornerstone_data'],
-                ['%s'],
-                ['%d', '%s']
-            );
+            // Write directly via $wpdb to preserve exact encoding. $wpdb->update()
+            // only touches an existing row, so insert when the meta is absent —
+            // otherwise restoring onto a post whose data was deleted silently
+            // does nothing and still reports success.
+            $exists = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_cornerstone_data'",
+                $postId
+            ));
+
+            if ($exists > 0) {
+                $wpdb->update(
+                    $wpdb->postmeta,
+                    ['meta_value' => $rawData],
+                    ['post_id' => $postId, 'meta_key' => '_cornerstone_data'],
+                    ['%s'],
+                    ['%d', '%s']
+                );
+            } else {
+                $wpdb->insert(
+                    $wpdb->postmeta,
+                    [
+                        'post_id'    => $postId,
+                        'meta_key'   => '_cornerstone_data',
+                        'meta_value' => $rawData,
+                    ],
+                    ['%d', '%s', '%s']
+                );
+            }
+
+            // $wpdb bypasses the object cache, so the old value would keep being
+            // served from it on sites running Redis/Memcached.
+            wp_cache_delete($postId, 'post_meta');
+
+            // post_content holds the compiled HTML that Cornerstone actually
+            // renders. Restoring the builder data alone leaves the *previous*
+            // layout on the front end while the builder shows the restored one.
+            $this->renderToPostContent($postId);
         } else {
             $wpdb->update(
                 $wpdb->posts,
@@ -278,6 +335,52 @@ final class LayoutService
     // ─── Internal ────────────────────────────────────────────────────────────
 
     /**
+     * Build a backup ID that does not collide with an existing one.
+     *
+     * time() has one-second resolution, so a deploy and an update landing in the
+     * same second would otherwise overwrite each other's restore point.
+     *
+     * @param array<string|int, mixed> $existing
+     */
+    private function uniqueBackupId(array $existing): string
+    {
+        $base = (string) time();
+        $id = $base;
+        $suffix = 1;
+
+        while (isset($existing[$id])) {
+            $id = $base . '-' . $suffix;
+            $suffix++;
+        }
+
+        return $id;
+    }
+
+    /**
+     * Compile a post's layout data into rendered HTML and store it in post_content.
+     *
+     * Cornerstone's FrontEnd service looks for the "<!-- cs-content -->" prefix in
+     * post_content to decide whether to render the page.
+     */
+    private function renderToPostContent(int $postId): void
+    {
+        if (! function_exists('cs_render_document_html_with_comment')) {
+            return;
+        }
+
+        $renderedHtml = cs_render_document_html_with_comment($postId);
+
+        if (empty($renderedHtml)) {
+            return;
+        }
+
+        wp_update_post([
+            'ID'           => $postId,
+            'post_content' => wp_slash($renderedHtml),
+        ]);
+    }
+
+    /**
      * Detect which storage format a post uses.
      *
      * @return 'post_meta'|'post_content'
@@ -349,7 +452,15 @@ final class LayoutService
 
         if ($source === 'post_meta') {
             // CRITICAL: wp_slash() prevents update_post_meta() from corrupting JSON.
+            $existing = get_post_meta($post->ID, '_cornerstone_data', true);
             $result = update_post_meta($post->ID, '_cornerstone_data', wp_slash($json));
+
+            // update_post_meta() returns false both on failure and when the value
+            // is unchanged. Deploying an identical layout is a success, not a
+            // failure, so disambiguate the two.
+            if ($result === false) {
+                $result = ($existing === $json);
+            }
 
             // Ensure Cornerstone settings meta exists — this is required for rendering.
             // Without it, Cornerstone won't recognize the page as a Cornerstone page.
@@ -373,17 +484,7 @@ final class LayoutService
             }
 
             // Compile layout data into rendered HTML and store in post_content.
-            // Cornerstone's FrontEnd service checks for "<!-- cs-content -->" prefix
-            // in post_content to decide whether to render the page.
-            if (function_exists('cs_render_document_html_with_comment')) {
-                $renderedHtml = cs_render_document_html_with_comment($post->ID);
-                if (! empty($renderedHtml)) {
-                    wp_update_post([
-                        'ID'           => $post->ID,
-                        'post_content' => wp_slash($renderedHtml),
-                    ]);
-                }
-            }
+            $this->renderToPostContent($post->ID);
 
             // Track last save timestamp.
             update_post_meta($post->ID, '_cs_last_save', time());

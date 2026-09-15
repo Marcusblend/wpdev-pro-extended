@@ -87,11 +87,16 @@ final class DeployLayout implements ToolInterface
 
         // Create backup.
         $backupId = null;
+        $warnings = [];
+
         if (! $skipBackup) {
             try {
                 $backupId = $this->layouts->backup($postId);
-            } catch (\Throwable) {
-                // First deploy — no existing data to back up.
+            } catch (\Throwable $e) {
+                // Usually a first deploy with no existing data to back up, but
+                // report it either way — silently skipping the backup is exactly
+                // what the caller needs to know about before overwriting a layout.
+                $warnings[] = 'Backup was not created: ' . $e->getMessage();
             }
         }
 
@@ -102,6 +107,7 @@ final class DeployLayout implements ToolInterface
             'deployed'  => $success,
             'post_id'   => $postId,
             'backup_id' => $backupId,
+            'warnings'  => $warnings,
         ];
     }
 

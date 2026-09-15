@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
 
 final class UpdateLayout implements ToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
+        private readonly HierarchyValidator $validator,
     ) {}
 
     public function name(): string
@@ -19,7 +21,7 @@ final class UpdateLayout implements ToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Supports adding, removing, and updating elements. Automatically creates a backup first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Supports adding, removing, and updating elements. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -54,20 +56,25 @@ final class UpdateLayout implements ToolInterface
                         ],
                     ],
                 ],
+                'skip_validation' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. Skip layout validation of the patched result before saving. Default: false.',
+                ],
             ],
         ];
     }
 
     public function execute(array $arguments): mixed
     {
-        $postId     = (int) ($arguments['post_id'] ?? 0);
-        $operations = $arguments['operations'] ?? [];
+        $postId         = (int) ($arguments['post_id'] ?? 0);
+        $operations     = $arguments['operations'] ?? [];
+        $skipValidation = (bool) ($arguments['skip_validation'] ?? false);
 
         if ($postId <= 0) {
             throw new \InvalidArgumentException('post_id must be a positive integer.');
         }
 
-        if (empty($operations)) {
+        if (! is_array($operations) || empty($operations)) {
             throw new \InvalidArgumentException('At least one operation is required.');
         }
 
@@ -75,19 +82,24 @@ final class UpdateLayout implements ToolInterface
         $envelope = $this->layouts->get($postId);
         $data = $envelope['data'];
 
-        // Create backup.
-        $backupId = null;
-        try {
-            $backupId = $this->layouts->backup($postId);
-        } catch (\Throwable) {
-            // Ignore if backup fails.
+        if (! is_array($data)) {
+            throw new \RuntimeException(
+                sprintf('Layout data for post %d is not an array and cannot be patched.', $postId)
+            );
         }
 
-        // Apply operations.
-        $applied = 0;
+        // Apply every operation to an in-memory copy first. Nothing is written
+        // unless all of them succeed, so a failed patch can never leave a
+        // half-applied element tree on the post.
+        $total  = count($operations);
         $errors = [];
 
         foreach ($operations as $index => $op) {
+            if (! is_array($op)) {
+                $errors[] = sprintf('Operation %s is not an object.', (string) $index);
+                continue;
+            }
+
             $opType = $op['op'] ?? '';
             $path = $op['path'] ?? '';
             $value = $op['value'] ?? null;
@@ -99,23 +111,59 @@ final class UpdateLayout implements ToolInterface
                     'remove' => $this->applyRemove($data, $path),
                     default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', $opType)),
                 };
-                $applied++;
             } catch (\Throwable $e) {
-                $errors[] = sprintf('Operation %d (%s): %s', $index, $opType, $e->getMessage());
+                $errors[] = sprintf('Operation %s (%s): %s', (string) $index, (string) $opType, $e->getMessage());
             }
         }
 
-        // Save modified data.
-        if ($applied > 0) {
-            $this->layouts->save($postId, $data);
+        if (! empty($errors)) {
+            return [
+                'updated'            => false,
+                'post_id'            => $postId,
+                'operations_applied' => 0,
+                'operations_total'   => $total,
+                'errors'             => $errors,
+            ];
         }
 
+        // Validate the patched result before it reaches the database. Patch
+        // operations can just as easily produce sparse `_bp_data` as a full
+        // deploy can, which crashes Cornerstone's editor.
+        if (! $skipValidation) {
+            $post = get_post($postId);
+            $context = ($post && $post->post_type === 'cs_global_block') ? 'flat' : 'inline';
+            $validation = $this->validator->validate($data, $context);
+
+            if (! $validation->valid) {
+                return [
+                    'updated'            => false,
+                    'post_id'            => $postId,
+                    'operations_applied' => 0,
+                    'operations_total'   => $total,
+                    'validation'         => $validation->toArray(),
+                ];
+            }
+        }
+
+        $backupId = null;
+        $warnings = [];
+
+        try {
+            $backupId = $this->layouts->backup($postId);
+        } catch (\Throwable $e) {
+            $warnings[] = 'Backup was not created: ' . $e->getMessage();
+        }
+
+        $saved = $this->layouts->save($postId, $data);
+
         return [
+            'updated'            => $saved,
             'post_id'            => $postId,
             'backup_id'          => $backupId,
-            'operations_applied' => $applied,
-            'operations_total'   => count($operations),
-            'errors'             => $errors,
+            'operations_applied' => $saved ? $total : 0,
+            'operations_total'   => $total,
+            'warnings'           => $warnings,
+            'errors'             => [],
         ];
     }
 

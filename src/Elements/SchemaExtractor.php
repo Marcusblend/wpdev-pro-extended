@@ -14,6 +14,9 @@ final class SchemaExtractor
     private const CACHE_KEY = 'pe_element_definitions';
     private const CACHE_TTL = HOUR_IN_SECONDS;
 
+    /** Stand-in for values that cannot survive serialization. */
+    private const UNSERIALIZABLE = '__unserializable_closure__';
+
     /**
      * Get all element definitions (serialized).
      *
@@ -32,11 +35,44 @@ final class SchemaExtractor
         }
 
         $elements = cornerstone('Elements');
-        $definitions = $elements->get_element_definitions();
 
-        set_transient(self::CACHE_KEY, $definitions, self::CACHE_TTL);
+        // Strip before caching *and* before returning: a cache hit would
+        // otherwise hand back a different shape than a cache miss, and a
+        // Closure encodes as null in the JSON-RPC response either way.
+        $definitions = $this->stripUnserializable($elements->get_element_definitions());
+
+        try {
+            set_transient(self::CACHE_KEY, $definitions, self::CACHE_TTL);
+        } catch (\Throwable) {
+            // Something in the definitions still refuses to serialize. Skip the
+            // cache rather than taking down every tool that reads the schema.
+        }
 
         return $definitions;
+    }
+
+    /**
+     * Recursively replace closures with a placeholder.
+     *
+     * Cornerstone element definitions can carry Closures for dynamic behaviour.
+     * `set_transient()` serializes its value, and PHP throws
+     * "Serialization of 'Closure' is not allowed" — which took out every tool
+     * reading the element schema (`list_elements`, `get_element_schema`,
+     * `validate_layout`, `deploy_layout`, and both schema resources).
+     *
+     * @see https://github.com/renandadalte/wpdev-pro-extended/issues/2
+     */
+    private function stripUnserializable(mixed $value): mixed
+    {
+        if ($value instanceof \Closure) {
+            return self::UNSERIALIZABLE;
+        }
+
+        if (is_array($value)) {
+            return array_map([$this, 'stripUnserializable'], $value);
+        }
+
+        return $value;
     }
 
     /**
@@ -144,7 +180,9 @@ final class SchemaExtractor
 
         if (isset($def['values']) && is_array($def['values'])) {
             foreach ($def['values'] as $key => $valueDef) {
-                if (is_array($valueDef) && isset($valueDef[0])) {
+                // array_key_exists(), not isset(): a property whose default is
+                // null is a real default and must not be dropped.
+                if (is_array($valueDef) && array_key_exists(0, $valueDef)) {
                     $defaults[$key] = $valueDef[0]; // First element is the default.
                 }
             }

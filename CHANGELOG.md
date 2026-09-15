@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1-alpha] - 2026-09-15
+
+### Fixed
+
+- **Backup corruption (data loss)**: `LayoutService::backup()` wrote the backup array through `update_post_meta()` without `wp_slash()`. `update_metadata()` applies `wp_unslash()` recursively, stripping the escaping out of the stored JSON — so any layout containing a non-ASCII character, a quote, or a URL was written to the backup unparseable, and `restore_layout` then wrote that broken JSON back to the post
+- **Restore left pages half-restored**: `LayoutService::restore()` wrote `_cornerstone_data` via `$wpdb` without invalidating the meta cache (stale reads on sites with a persistent object cache) and without recompiling `post_content`, so the front end kept rendering the *previous* layout while the builder showed the restored one. It also silently no-opped when the meta row did not exist
+- **Cornerstone false negative**: the availability check ran on `plugins_loaded`, but WordPress loads themes *after* that hook — so the "Cornerstone is not available" notice appeared on every request even when Cornerstone was working. Moved to `admin_init` and the message no longer claims features are disabled, which was never true
+- **Closure serialization**: `SchemaExtractor::getAllDefinitions()` passed raw element definitions to `set_transient()`, throwing "Serialization of 'Closure' is not allowed" and taking out `list_elements`, `get_element_schema`, `validate_layout`, `deploy_layout` and both schema resources. Closures are now replaced with a placeholder before caching *and* before returning, and a failed cache write degrades to no caching instead of a fatal ([#2](https://github.com/renandadalte/wpdev-pro-extended/issues/2))
+- **`get_site_info` fatal over REST**: called `get_plugin_data()`, which lives in `wp-admin/includes/plugin.php` and is not loaded on REST requests; now included explicitly
+- **Deploy reported failure on a no-op**: `update_post_meta()` returns `false` both on error and when the value is unchanged, so redeploying an identical layout reported `deployed: false`
+- **Backup ID collisions**: IDs came from `time()`, so a deploy and an update in the same second overwrote each other's restore point
+- **Missing post check**: `backup()` passed a null post to `detectSource()`, and callers swallowed the resulting `TypeError` — so an invalid `post_id` silently proceeded with no backup
+- **Dropped null defaults**: `SchemaExtractor::getDefaults()` used `isset()`, discarding any element property whose default value is `null`
+
+### Changed
+
+- **`update_layout` is now atomic**: operations are applied in memory and the layout is written only if *all* of them succeed — previously a partial application was saved and reported success with the errors nested inside
+- **`update_layout` now validates**: the patched result is checked before writing (`skip_validation` opts out), closing the path by which patch operations could write the sparse `_bp_data` that crashes Cornerstone's editor
+- **Backup failures are reported**: `deploy_layout` and `update_layout` return a `warnings` array instead of silently discarding a failed backup
+
 ## [1.0.0-alpha] - 2026-02-20
 
 ### Added

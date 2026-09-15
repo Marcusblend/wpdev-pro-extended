@@ -32,6 +32,13 @@ final class GetSiteInfo implements ToolInterface
         $bpBase = (int) get_option('x_breakpoint_base', 4);
         $bpRanges = get_option('x_breakpoint_ranges', []);
 
+        // `get_plugin_data()` lives in wp-admin/includes/plugin.php, which
+        // WordPress does not load on REST requests. Without this the tool only
+        // works when some other plugin happens to have included that file.
+        if (! function_exists('get_plugin_data')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
         // Active plugins (names only, no paths).
         $activePlugins = get_option('active_plugins', []);
         $pluginNames = [];

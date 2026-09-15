@@ -269,7 +269,7 @@ The server implements [MCP 2025-03-26](https://modelcontextprotocol.io/) via **S
 - **Endpoint**: `POST /wp-json/pro-extended/v1/mcp`
 - **Protocol**: JSON-RPC 2.0
 - **Authentication**: WordPress Application Passwords (Basic Auth)
-- **Capability checks**: Per-tool (`edit_posts` for reads, `manage_options` for writes)
+- **Capability checks**: Per-tool (`edit_posts` for reads, `manage_options` for writes — except `create_page`, which requires `publish_pages`)
 
 ### Cornerstone Data Handling
 
@@ -290,7 +290,7 @@ The plugin handles all three Cornerstone storage formats:
 
 - All endpoints require WordPress authentication (Application Passwords)
 - Read tools require `edit_posts` capability
-- Write tools require `manage_options` capability
+- Write tools require `manage_options` capability (`create_page` requires `publish_pages`)
 - Input validation on all tool parameters
 - Layout structure validation before writes
 - Auto-backup before destructive operations

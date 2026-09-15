@@ -4,7 +4,7 @@
  * Plugin Name: Pro Extended
  * Plugin URI:  https://github.com/renandadalte/wpdev-pro-extended
  * Description: Extends Pro Theme / Cornerstone with MCP Server, Design Tokens, Element Defaults, and developer utilities.
- * Version:     1.0.0-alpha
+ * Version:     1.0.1-alpha
  * Author:      Renan Dadalte
  * Author URI:  https://github.com/renandadalte
  * License:     GPL-2.0-or-later
@@ -21,7 +21,7 @@ if (! defined('ABSPATH')) {
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-define('PE_VERSION', '1.0.0-alpha');
+define('PE_VERSION', '1.0.1-alpha');
 define('PE_FILE', __FILE__);
 define('PE_DIR', plugin_dir_path(__FILE__));
 define('PE_URL', plugin_dir_url(__FILE__));
@@ -115,16 +115,27 @@ function pro_extended(): ProExtended\Plugin
     return $instance;
 }
 
-// Initialize on plugins_loaded (priority 20 to ensure Pro Theme is loaded).
+// Initialize on plugins_loaded (priority 20) so the REST routes and CLI
+// commands are registered before the request is routed.
 add_action('plugins_loaded', function (): void {
-    // Extra safety check: ensure Cornerstone is available.
-    if (! function_exists('cornerstone')) {
-        add_action('admin_notices', function (): void {
-            echo '<div class="notice notice-warning"><p>';
-            echo esc_html__('Pro Extended: Cornerstone is not available. Some features will be disabled.', 'wpdev-pro-extended');
-            echo '</p></div>';
-        });
-    }
-
     pro_extended()->boot();
 }, 20);
+
+// Cornerstone ships with the Pro Theme, and WordPress loads themes *after*
+// `plugins_loaded` fires — so no priority on that hook can observe it. Checking
+// there reported Cornerstone missing on every request. `admin_init` runs after
+// the theme is loaded, and an admin notice is only ever seen in the admin.
+add_action('admin_init', function (): void {
+    if (function_exists('cornerstone')) {
+        return;
+    }
+
+    add_action('admin_notices', function (): void {
+        echo '<div class="notice notice-warning"><p>';
+        echo esc_html__(
+            'Pro Extended: Cornerstone is not available, so the element schema and layout validation tools will return empty results.',
+            'wpdev-pro-extended'
+        );
+        echo '</p></div>';
+    });
+});

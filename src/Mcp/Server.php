@@ -280,25 +280,27 @@ final class Server
 
         $this->toolsRegistered = true;
 
+        // The validator memoizes the hierarchy map, so share one instance rather
+        // than rebuilding it per tool.
+        $validator = new \ProExtended\Elements\HierarchyValidator($this->schema);
+
         // Read tools.
         $this->registerTool(new Tools\ListElements($this->schema));
         $this->registerTool(new Tools\GetElementSchema($this->schema));
         $this->registerTool(new Tools\ListLayouts($this->layouts));
         $this->registerTool(new Tools\GetLayout($this->layouts));
-        $this->registerTool(new Tools\ValidateLayout(
-            new \ProExtended\Elements\HierarchyValidator($this->schema),
-        ));
+        $this->registerTool(new Tools\ValidateLayout($validator));
         $this->registerTool(new Tools\ListColors());
         $this->registerTool(new Tools\ListFonts());
         $this->registerTool(new Tools\GetSiteInfo());
 
         // Write tools.
         $this->registerTool(new Tools\CreatePage($this->layouts));
-        $this->registerTool(new Tools\DeployLayout($this->layouts, new \ProExtended\Elements\HierarchyValidator($this->schema)));
+        $this->registerTool(new Tools\DeployLayout($this->layouts, $validator));
         $this->registerTool(new Tools\BackupLayout($this->layouts));
         $this->registerTool(new Tools\RestoreLayout($this->layouts));
         $this->registerTool(new Tools\ClearCache());
-        $this->registerTool(new Tools\UpdateLayout($this->layouts));
+        $this->registerTool(new Tools\UpdateLayout($this->layouts, $validator));
 
         // Resources.
         $this->registerResource(new Resources\ElementSchemaResource($this->schema));
