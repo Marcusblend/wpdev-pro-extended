@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ProExtended\Mcp;
 
 use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Layouts\LayoutService;
@@ -373,6 +374,7 @@ TXT;
         $hostCache = $this->hostCache ?? new HostCache();
         $schema    = $this->schema;
         $layouts   = $this->layouts;
+        $elements  = new ElementContext($schema);
 
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
@@ -393,15 +395,15 @@ TXT;
             'get_site_info'         => fn() => new Tools\GetSiteInfo(new Health($gateway, $hostCache, $this)),
 
             // Write tools.
-            'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator()),
-            'deploy_layout'         => static fn() => new Tools\DeployLayout($layouts, $validator()),
+            'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
+            'deploy_layout'         => static fn() => new Tools\DeployLayout($layouts, $validator(), $elements),
             'backup_layout'         => static fn() => new Tools\BackupLayout($layouts),
             'restore_layout'        => static fn() => new Tools\RestoreLayout($layouts),
             'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache),
-            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator()),
+            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements),
 
             // Site foundations (1.1.0).
-            'create_document'          => static fn() => new Tools\CreateDocument($layouts, $validator()),
+            'create_document'          => static fn() => new Tools\CreateDocument($layouts, $validator(), $elements),
             'update_document_settings' => static fn() => new Tools\UpdateDocumentSettings($layouts),
             'list_components'          => static fn() => new Tools\ListComponents($gateway),
             'get_global_css'           => static fn() => new Tools\GetGlobalCss($gateway),

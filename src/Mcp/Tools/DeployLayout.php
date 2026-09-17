@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 use ProExtended\Support\SkipValidation;
 
@@ -14,6 +16,7 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
+        private readonly ?ElementContext $elements = null,
     ) {}
 
     public function name(): string
@@ -48,6 +51,10 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
                     'type'        => 'boolean',
                     'description' => 'Optional. Skip automatic backup before deploying. Default: false.',
                 ],
+                'stamp_new' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. The layout holds new elements: add the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements where missing. Leave it off for content that came from the site, because an element without _m is legacy content whose look depends on old defaults. Default: false.',
+                ],
             ],
         ];
     }
@@ -59,6 +66,7 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
         $layoutData     = $arguments['layout_data'] ?? null;
         $skipValidation = (bool) ($arguments['skip_validation'] ?? false);
         $skipBackup     = (bool) ($arguments['skip_backup'] ?? false);
+        $stampNew       = Args::bool($arguments, 'stamp_new', false);
 
         if ($postId <= 0) {
             throw new \InvalidArgumentException('post_id must be a positive integer.');
@@ -81,6 +89,27 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
         // Validate layout data.
         $backupId = null;
         $warnings = [];
+        $stamped = null;
+
+        if (is_array($layoutData) && $this->elements !== null) {
+            $stamper = $this->elements->stamper(! $stampNew);
+            $stampedData = $stamper->stampData($layoutData, $context === 'flat');
+            $stamped = $stamper->counts();
+
+            if ($stampNew) {
+                $layoutData = $stampedData;
+            } elseif ($stamped['_m'] > 0 || $stamped['_bp_base'] > 0) {
+                $warnings[] = sprintf(
+                    'Of %d elements, %d have no _m migration marker and %d no _bp_base. Cornerstone treats them as legacy content and fills unset values with old defaults. If they are new elements, deploy with stamp_new: true.',
+                    $stamped['elements'],
+                    $stamped['_m'],
+                    $stamped['_bp_base']
+                );
+                $stamped = null;
+            } else {
+                $stamped = null;
+            }
+        }
 
         if (! $skipValidation) {
             $validation = $this->validator->validate($layoutData, $context);
@@ -92,6 +121,7 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
                     'backup_id'  => null,
                     'warnings'   => $warnings,
                     'validation' => $validation->toArray(),
+                    'stamped'    => $stamped,
                 ];
             }
 
@@ -126,6 +156,7 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
             'backup_id'  => $backupId,
             'warnings'   => array_merge($warnings, $write['warnings']),
             'write_path' => $write['path'],
+            'stamped'    => $stamped,
         ];
     }
 

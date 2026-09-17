@@ -368,6 +368,28 @@ final class PeSmoke
         return ['code' => $code, 'stdout' => $stdout, 'output' => trim($stdout . "\n" . $stderr)];
     }
 
+    /**
+     * Layout data as the create tools store it: with the migration and
+     * breakpoint markers Cornerstone gives new elements.
+     *
+     * @param string $shape "tree" (a page), "regions" (a layout's regions map)
+     *                      or "flat" (a component document's element map).
+     */
+    public static function stamped(mixed $data, string $shape = 'tree'): mixed
+    {
+        if (! is_array($data)) {
+            return $data;
+        }
+
+        $stamper = (new \ProExtended\Cornerstone\ElementContext(pro_extended()->schemaExtractor()))->stamper();
+
+        return match ($shape) {
+            'regions' => $stamper->stampRegions($data),
+            'flat'    => $stamper->stampFlat($data),
+            default   => $stamper->stampTree($data),
+        };
+    }
+
     public static function summary(): void
     {
         echo "\n== Created on this site (titled PE TEST; left in place) ==\n";

@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\ElementContext;
+use ProExtended\Elements\ElementStamper;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 use ProExtended\Support\SkipValidation;
 
@@ -14,6 +17,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
+        private readonly ?ElementContext $elements = null,
     ) {}
 
     public function name(): string
@@ -62,6 +66,10 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                     'type'        => 'boolean',
                     'description' => 'Optional. Skip layout validation of the patched result before saving. Default: false.',
                 ],
+                'stamp_new' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. Give elements inserted by "add" operations the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
+                ],
             ],
         ];
     }
@@ -72,6 +80,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         $postId         = (int) ($arguments['post_id'] ?? 0);
         $operations     = $arguments['operations'] ?? [];
         $skipValidation = (bool) ($arguments['skip_validation'] ?? false);
+        $stampNew       = Args::bool($arguments, 'stamp_new', true);
 
         if ($postId <= 0) {
             throw new \InvalidArgumentException('post_id must be a positive integer.');
@@ -103,6 +112,9 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         $original = $data;
         $errors   = [];
         $warnings = [];
+        $post     = get_post($postId);
+        $flat     = $post instanceof \WP_Post && $post->post_type === 'cs_global_block';
+        $stamper  = $stampNew && $this->elements !== null ? $this->elements->stamper() : null;
 
         // Apply every operation to an in-memory copy first. Nothing is written
         // unless all of them succeed, so a failed patch can never leave a
@@ -116,6 +128,10 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             $opType = $op['op'] ?? '';
             $path   = $op['path'] ?? '';
             $value  = $op['value'] ?? null;
+
+            if ($opType === 'add' && $stamper !== null && is_array($value)) {
+                $value = $this->stampInserted($stamper, $value, $flat);
+            }
 
             try {
                 match ($opType) {
@@ -139,8 +155,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         $validation = null;
 
         if (! $skipValidation) {
-            $post = get_post($postId);
-            $context = ($post && $post->post_type === 'cs_global_block') ? 'flat' : 'inline';
+            $context = $flat ? 'flat' : 'inline';
 
             $after = $this->validator->validate($data, $context);
             $validation = $after->toArray();
@@ -194,8 +209,26 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             $validation
         );
         $result['write_path'] = $write['path'];
+        $result['stamped'] = $stamper?->counts();
 
         return $result;
+    }
+
+    /**
+     * Stamp what an "add" operation inserts: one element (with its children),
+     * a list of elements, or, in a component document's flat map, a single
+     * element whose children are ID strings.
+     *
+     * @param  array<mixed> $value
+     * @return array<mixed>
+     */
+    private function stampInserted(ElementStamper $stamper, array $value, bool $flat): array
+    {
+        if (isset($value['_type'])) {
+            return $flat ? $stamper->stampFlat(['new' => $value])['new'] : $stamper->stampElement($value);
+        }
+
+        return array_is_list($value) ? $stamper->stampTree($value) : $value;
     }
 
     /**

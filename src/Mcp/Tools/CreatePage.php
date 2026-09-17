@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Support\Args;
@@ -14,6 +15,7 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly ?HierarchyValidator $validator = null,
+        private readonly ?ElementContext $elements = null,
     ) {}
 
     public function name(): string
@@ -69,6 +71,10 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
                     'type'        => 'boolean',
                     'description' => 'Optional. When true and a page with the same slug and parent exists (a draft without a slug matches on its title), return it and write nothing. Default: false.',
                 ],
+                'stamp_new' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. Give every element in layout_data the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
+                ],
             ],
         ];
     }
@@ -100,6 +106,8 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
         $template    = Args::string($arguments, 'template', null, 200);
         $excerpt     = Args::string($arguments, 'excerpt', null);
         $ifNotExists = Args::bool($arguments, 'if_not_exists', false);
+        $stampNew    = Args::bool($arguments, 'stamp_new', true);
+        $stamped     = null;
 
         if ($parentId > 0) {
             $parent = get_post($parentId);
@@ -130,6 +138,12 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
                 throw new \InvalidArgumentException('layout_data must be an array of elements.');
             }
 
+            if ($stampNew && $this->elements !== null) {
+                $stamper = $this->elements->stamper();
+                $layout = $stamper->stampData($layout, false);
+                $stamped = $stamper->counts();
+            }
+
             if ($this->validator !== null) {
                 $validation = $this->validator->validate($layout, 'inline');
 
@@ -147,7 +161,7 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
             $existing = $this->findExisting($slug, $title, $parentId);
 
             if ($existing !== null) {
-                return $this->result($existing, false, $warnings);
+                return $this->result($existing, false, $warnings) + ['stamped' => null];
             }
         }
 
@@ -200,7 +214,7 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
             update_post_meta($postId, '_wp_page_template', $template);
         }
 
-        return $this->result($postId, true, $warnings, $writePath);
+        return $this->result($postId, true, $warnings, $writePath) + ['stamped' => $stamped];
     }
 
     /**

@@ -6,6 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\DocumentSettings;
+use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\ElementTree;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutOutline;
@@ -16,13 +17,14 @@ use ProExtended\Support\JsonArgs;
 
 final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 {
-    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'if_not_exists', 'dry_run'];
+    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'if_not_exists', 'dry_run', 'stamp_new'];
 
     private readonly DocumentGateway $gateway;
 
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
+        private readonly ?ElementContext $elements = null,
     ) {
         $this->gateway = $layouts->gateway();
     }
@@ -72,6 +74,10 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                     'type'        => 'boolean',
                     'description' => 'Optional. Report what would be created and write nothing. Default: false.',
                 ],
+                'stamp_new' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. Give every element in layout_data the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
+                ],
             ],
         ];
     }
@@ -106,6 +112,8 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
         $slug = $slug !== null ? sanitize_title($slug) : '';
         $ifNotExists = Args::bool($arguments, 'if_not_exists', true);
         $dryRun = Args::bool($arguments, 'dry_run', false);
+        $stampNew = Args::bool($arguments, 'stamp_new', true);
+        $stamped = null;
         $warnings = [];
 
         $settings = DocumentSettings::validate($docType, Args::object($arguments, 'settings') ?? []);
@@ -118,6 +126,12 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 
         if ($elements !== null && ! current_user_can('unfiltered_html') && ElementTree::containsRawContent($elements)) {
             throw new ToolPermissionException('Adding Raw Content elements requires the unfiltered_html capability.');
+        }
+
+        if ($elements !== null && $stampNew && $this->elements !== null) {
+            $stamper = $this->elements->stamper();
+            $elements = $isComponent ? $stamper->stampFlat($elements) : $stamper->stampRegions($elements);
+            $stamped = $stamper->counts();
         }
 
         if ($elements !== null) {
@@ -150,6 +164,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                     'backup_id'   => null,
                     'write_path'  => null,
                     'warnings'    => array_merge($warnings, [sprintf('A %s titled "%s" already exists; nothing was written.', $type, $title)]),
+                    'stamped'     => null,
                 ];
             }
         }
@@ -178,6 +193,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                 'backup_id'    => null,
                 'write_path'   => $this->gateway->apiAvailable() ? DocumentGateway::PATH_API : DocumentGateway::PATH_FALLBACK,
                 'warnings'     => $warnings,
+                'stamped'      => $stamped,
             ];
         }
 
@@ -211,6 +227,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
             'backup_id'  => null,
             'write_path' => $result['path'],
             'warnings'   => array_merge($warnings, $result['warnings']),
+            'stamped'    => $stamped,
         ];
     }
 

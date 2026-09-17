@@ -1,0 +1,133 @@
+<?php
+
+declare(strict_types=1);
+
+namespace ProExtended\Cornerstone;
+
+use ProExtended\Elements\ElementStamper;
+use ProExtended\Elements\SchemaExtractor;
+
+/**
+ * What this site's Cornerstone says about elements: each type's migration
+ * version and the breakpoint tag new elements are stamped with.
+ */
+final class ElementContext
+{
+    /**
+     * Base migration counts in Cornerstone 7.9.4, used when the element
+     * registry cannot be read.
+     */
+    public const KNOWN_MIGRATIONS = [
+        'nav-collapsed' => 1,
+        'nav-layered'   => 1,
+        'bar'           => 1,
+        'section'       => 2,
+        'layout-row'    => 2,
+        'layout-grid'   => 1,
+        'text'          => 1,
+        'container'     => 2,
+        'layout-column' => 2,
+        'layout-div'    => 1,
+        'layout-cell'   => 1,
+        'row'           => 1,
+        'column'        => 1,
+    ];
+
+    /** Pro's default breakpoints: base 4 of ranges 480, 767, 979, 1200. */
+    public const DEFAULT_BREAKPOINT_TAG = '4_4';
+
+    /** @var array<string, int>|null */
+    private ?array $versions = null;
+
+    private ?string $tag = null;
+
+    public function __construct(
+        private readonly SchemaExtractor $schema,
+    ) {}
+
+    /**
+     * Element type => latest migration version, for types that have
+     * migrations.
+     *
+     * @return array<string, int>
+     */
+    public function migrationVersions(): array
+    {
+        if ($this->versions !== null) {
+            return $this->versions;
+        }
+
+        $versions = [];
+        $readable = false;
+
+        try {
+            foreach ($this->schema->getAllDefinitions() as $definition) {
+                if (! is_array($definition) || ! isset($definition['id']) || ! array_key_exists('version', $definition)) {
+                    continue;
+                }
+
+                $readable = true;
+                $version = (int) $definition['version'];
+
+                if ($version > 0) {
+                    $versions[(string) $definition['id']] = $version;
+                }
+            }
+        } catch (\Throwable) {
+            $readable = false;
+        }
+
+        return $this->versions = $readable ? $versions : self::KNOWN_MIGRATIONS;
+    }
+
+    /**
+     * The site's breakpoint tag ("<base>_<range count>"), as Cornerstone's
+     * migrations compute it.
+     */
+    public function breakpointTag(): string
+    {
+        if ($this->tag !== null) {
+            return $this->tag;
+        }
+
+        if (function_exists('cornerstone')) {
+            try {
+                $breakpoints = cornerstone('Breakpoints');
+
+                if (is_object($breakpoints) && method_exists($breakpoints, 'breakpointConfig')) {
+                    $config = $breakpoints->breakpointConfig();
+
+                    if (is_array($config) && isset($config[0], $config[2]) && is_numeric($config[0]) && is_numeric($config[2])) {
+                        return $this->tag = (int) $config[0] . '_' . (int) $config[2];
+                    }
+                }
+            } catch (\Throwable) {
+                // Read the theme options below.
+            }
+        }
+
+        $ranges = get_option('x_breakpoint_ranges', null);
+        $base = get_option('x_breakpoint_base', null);
+
+        if (is_array($ranges) && $ranges !== [] && is_numeric($base)) {
+            return $this->tag = (int) $base . '_' . count($ranges);
+        }
+
+        return $this->tag = self::DEFAULT_BREAKPOINT_TAG;
+    }
+
+    /**
+     * How many values a `_bp_data` array holds on this site.
+     */
+    public function breakpointSlots(): int
+    {
+        $parts = explode('_', $this->breakpointTag());
+
+        return (int) ($parts[1] ?? 4) + 1;
+    }
+
+    public function stamper(bool $dryRun = false): ElementStamper
+    {
+        return new ElementStamper($this->migrationVersions(), $this->breakpointTag(), $dryRun);
+    }
+}

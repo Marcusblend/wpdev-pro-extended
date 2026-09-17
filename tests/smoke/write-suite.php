@@ -285,7 +285,7 @@ $jsonPage = S::ok(S::call('create_page', ['title' => "PE TEST JSON page {$run}",
 
 if (isset($jsonPage['post_id'])) {
     S::track('page', (int) $jsonPage['post_id'], "PE TEST JSON page {$run}");
-    S::same($simplePage, S::layout((int) $jsonPage['post_id']), 'create_page stored the decoded layout, not an empty page');
+    S::same(S::stamped($simplePage), S::layout((int) $jsonPage['post_id']), 'create_page stored the decoded layout, not an empty page');
 }
 
 $jsonFooterData = $layoutFixture('footer', "PE-TEST-JSON-{$run}");
@@ -298,7 +298,7 @@ $jsonFooter = S::ok(S::call('create_document', [
 
 if (isset($jsonFooter['document_id'])) {
     S::track('document', (int) $jsonFooter['document_id'], "PE TEST JSON footer {$run}");
-    S::same($jsonFooterData['regions'], S::layout((int) $jsonFooter['document_id'])['regions'] ?? null, 'create_document stored the decoded regions');
+    S::same(S::stamped($jsonFooterData['regions'], 'regions'), S::layout((int) $jsonFooter['document_id'])['regions'] ?? null, 'create_document stored the decoded regions');
 }
 
 S::isError(S::call('validate_layout', ['layout_data' => '[{"_type": "section",']), 'validate_layout: an undecodable string is an error', 'could not be decoded');
@@ -382,13 +382,13 @@ foreach (['api', 'fallback'] as $mode) {
             $storedSettings = is_array($stored['settings'] ?? null) ? $stored['settings'] : [];
 
             if ($type === 'component') {
-                S::same($fixture['elements'], $stored['elements'] ?? null, "{$type}: get_layout returns the elements that were sent");
+                S::same(S::stamped($fixture['elements'], 'flat'), $stored['elements'] ?? null, "{$type}: get_layout returns the elements that were sent, stamped");
                 S::settingsRoundTrip($fixture['settings'], $storedSettings, $componentExtra, "{$type}: settings round-trip");
                 S::check(($storedSettings['general_post_title'] ?? null) === $title, "{$type}: general_post_title matches the title");
             } else {
                 $extraKey = in_array($type, ['header', 'footer'], true) ? $type : 'theme';
                 $expectedLayoutType = in_array($type, ['header', 'footer'], true) ? 'any' : $gateway->layoutTypeFor($gateway->docTypeForType($type));
-                S::same($fixture['regions'], $stored['regions'] ?? null, "{$type}: get_layout returns the regions that were sent");
+                S::same(S::stamped($fixture['regions'], 'regions'), $stored['regions'] ?? null, "{$type}: get_layout returns the regions that were sent, stamped");
                 S::settingsRoundTrip($fixture['settings'], $storedSettings, $layoutExtra[$extraKey], "{$type}: settings round-trip");
                 S::check(($storedSettings['layout_type'] ?? null) === $expectedLayoutType, "{$type}: layout_type is \"{$expectedLayoutType}\"", (string) wp_json_encode($storedSettings['layout_type'] ?? null));
                 S::check(($storedSettings['assignments'] ?? null) === [], "{$type}: not assigned");
@@ -473,7 +473,7 @@ foreach (['api', 'fallback'] as $mode) {
                 S::check($home['code'] === 200 && ! str_contains($home['body'], $header['marker']), 'the homepage no longer shows the test header', "HTTP {$home['code']}");
             }
 
-            S::same($header['fixture']['regions'], S::layout($header['id'])['regions'] ?? null, 'settings updates left the header elements untouched');
+            S::same(S::stamped($header['fixture']['regions'], 'regions'), S::layout($header['id'])['regions'] ?? null, 'settings updates left the header elements untouched');
             S::check((S::layout($header['id'])['settings']['layout_type'] ?? null) === 'any', 'the header kept layout_type "any"');
         }
 
@@ -505,7 +505,7 @@ foreach (['api', 'fallback'] as $mode) {
             if (isset($page['post_id'])) {
                 S::track('page', (int) $page['post_id'], $pageTitle);
                 S::check(! str_contains($warningsOf($page), $cid), 'the page was created without component warnings', $warningsOf($page));
-                S::same($instance, S::layout((int) $page['post_id']), 'the page holds the instance');
+                S::same(S::stamped($instance), S::layout((int) $page['post_id']), 'the page holds the instance');
             }
 
             $missingId = 'peTestMissing' . $run;
@@ -606,7 +606,7 @@ $rawDocId = (int) ($rawDoc['document_id'] ?? 0);
 
 if ($rawDocId > 0) {
     S::track('document', $rawDocId, $rawFooterTitle);
-    S::same($rawFooter['regions'], S::layout($rawDocId)['regions'] ?? null, 'the document returns the Raw Content unchanged');
+    S::same(S::stamped($rawFooter['regions'], 'regions'), S::layout($rawDocId)['regions'] ?? null, 'the document returns the Raw Content unchanged');
 
     $rawFooter['regions']['footer'][0]['_modules'][0]['_modules'][1]['raw_content'] = $rawHtml . '<!-- v2 -->';
     $deploy = S::ok(S::call('deploy_layout', ['post_id' => $rawDocId, 'layout_data' => $rawFooter]), 'deploy the footer with changed Raw Content');
@@ -621,7 +621,7 @@ $rawPageResult = S::ok(S::call('create_page', ['title' => $rawPageTitle, 'layout
 if (isset($rawPageResult['post_id'])) {
     $rawPageId = (int) $rawPageResult['post_id'];
     S::track('page', $rawPageId, $rawPageTitle);
-    S::same($rawPage, S::layout($rawPageId), 'the page returns the Raw Content unchanged');
+    S::same(S::stamped($rawPage), S::layout($rawPageId), 'the page returns the Raw Content unchanged');
     $rendered = (string) S::postField($rawPageId, 'post_content');
     S::check(str_contains($rendered, '<iframe') && str_contains($rendered, 'window.peSmokeTest'), 'the rendered page keeps the iframe and the script');
 }
@@ -670,7 +670,7 @@ if ($renameId > 0) {
     S::check(S::postField($renameId, 'post_title') === $newTitle && S::postField($renameId, 'post_name') === $newSlug, 'the title and slug changed');
     $storedRename = S::layout($renameId);
     S::check(($storedRename['settings']['general_post_name'] ?? null) === $newSlug && ($storedRename['settings']['library_group'] ?? null) === 'PE Test Renamed', 'the stored settings follow');
-    S::same($componentFixture('peTestRename' . $run, 'PE Test Rename')['elements'], $storedRename['elements'] ?? null, 'the elements were not touched');
+    S::same(S::stamped($componentFixture('peTestRename' . $run, 'PE Test Rename')['elements'], 'flat'), $storedRename['elements'] ?? null, 'the elements were not touched');
 
     $deploy = S::ok(S::call('deploy_layout', ['post_id' => $renameId, 'layout_data' => $storedRename]), 'deploy the document unchanged (its backup has no title fields)');
     $second = S::ok(S::call('update_document_settings', ['document_id' => $renameId, 'title' => "PE TEST Renamed again {$run}"]), 'rename it again');
@@ -1430,6 +1430,129 @@ if (isset($tabsPage['post_id'])) {
     $storedTabs = S::layout((int) $tabsPage['post_id']);
     $storedTab = $storedTabs[0]['_modules'][0]['_modules'][0]['_modules'][0]['_modules'][0] ?? [];
     S::check(($storedTab['tab_label_content'] ?? null) === 'PE TEST tab', 'tabs keep their content through the save', (string) wp_json_encode($storedTab));
+}
+
+// 21. Migration and breakpoint stamps --------------------------------------------
+
+S::section('21 migration and breakpoint stamps');
+
+$elementContext = new \ProExtended\Cornerstone\ElementContext(pro_extended()->schemaExtractor());
+$siteTag = $elementContext->breakpointTag();
+S::check((bool) preg_match('/^\d+_\d+$/', $siteTag), 'the site has a breakpoint tag', $siteTag);
+S::check(($elementContext->migrationVersions()['bar'] ?? 0) >= 1 && ($elementContext->migrationVersions()['section'] ?? 0) >= 2, 'migration versions come from the registry', (string) wp_json_encode($elementContext->migrationVersions()));
+
+// The elements Cornerstone works with after loading a document (its migrations run on load).
+$migrated = static function (int $id): array {
+    clean_post_cache($id);
+    wp_cache_delete($id, 'post_meta');
+    $class = '\\Themeco\\Cornerstone\\Documents\\Document';
+    $doc = $class::locate($id);
+
+    return is_object($doc) ? (array) ($doc->data()['elements'] ?? []) : [];
+};
+$barDefault = (string) (cs_get_element('bar')->get_aggregated_values()['bar_height'][0] ?? '');
+$effectiveBarHeight = static fn(array $bar): string => (string) ($bar['bar_height'] ?? $barDefault);
+
+$navHeader = [
+    'settings' => ['assignments' => [], 'assignment_priority' => 0],
+    'regions'  => [
+        'top'    => [[
+            '_type'    => 'bar',
+            '_region'  => 'top',
+            '_modules' => [[
+                '_type'    => 'container',
+                '_region'  => 'top',
+                '_modules' => [
+                    ['_type' => 'text', '_region' => 'top', 'text_content' => "PE-TEST-STAMP-{$run}"],
+                    ['_type' => 'nav-collapsed', '_region' => 'top'],
+                ],
+            ]],
+        ]],
+        'right'  => [],
+        'bottom' => [],
+        'left'   => [],
+    ],
+];
+$stampTitle = "PE TEST Stamped header {$run}";
+$stampDoc = S::ok(S::call('create_document', ['type' => 'header', 'title' => $stampTitle, 'layout_data' => $navHeader]), 'create a header with a bar and a collapsed nav');
+$stampDocId = (int) ($stampDoc['document_id'] ?? 0);
+
+if ($stampDocId > 0) {
+    S::track('document', $stampDocId, $stampTitle);
+    S::check(($stampDoc['stamped']['_m'] ?? 0) === 4 && ($stampDoc['stamped']['_bp_base'] ?? 0) === 4, 'create_document reports the stamps', (string) wp_json_encode($stampDoc['stamped'] ?? null));
+
+    $stored = S::layout($stampDocId)['regions']['top'][0] ?? [];
+    S::check(($stored['_m'] ?? null) === ['e' => 1] && ($stored['_bp_base'] ?? null) === $siteTag, 'the stored bar has _m and the site tag', (string) wp_json_encode(array_intersect_key($stored, array_flip(['_m', '_bp_base']))));
+
+    $top = $migrated($stampDocId)['top'][0] ?? [];
+    $nav = $top['_modules'][0]['_modules'][1] ?? [];
+    S::check($effectiveBarHeight($top) === '100px' && $barDefault === '100px', 'a stamped bar keeps its 100px height after Cornerstone loads it', $effectiveBarHeight($top));
+    S::check(empty($nav['legacy_region_detect']), 'a stamped nav in a header bar stays inline', (string) wp_json_encode($nav['legacy_region_detect'] ?? null));
+
+    $legacyDeploy = S::ok(S::call('deploy_layout', ['post_id' => $stampDocId, 'layout_data' => $navHeader]), 'deploy the unmarked header without stamp_new');
+    S::check((bool) array_filter((array) ($legacyDeploy['warnings'] ?? []), static fn($w): bool => str_contains((string) $w, 'stamp_new')), 'deploy_layout warns about the missing markers', (string) wp_json_encode($legacyDeploy['warnings'] ?? null));
+    S::check(S::isNull($legacyDeploy, 'stamped'), 'nothing was stamped', (string) wp_json_encode($legacyDeploy));
+    $top = $migrated($stampDocId)['top'][0] ?? [];
+    $nav = $top['_modules'][0]['_modules'][1] ?? [];
+    S::check($effectiveBarHeight($top) === '6em' && ! empty($nav['legacy_region_detect']), 'unmarked, the bar gets the legacy 6em height and the nav turns into a toggle (why stamps matter)', $effectiveBarHeight($top));
+
+    $stampDeploy = S::ok(S::call('deploy_layout', ['post_id' => $stampDocId, 'layout_data' => $navHeader, 'stamp_new' => true]), 'deploy it again with stamp_new: true');
+    S::check(($stampDeploy['stamped']['_m'] ?? 0) === 4, 'deploy_layout reports the stamps', (string) wp_json_encode($stampDeploy['stamped'] ?? null));
+    S::check(! array_filter((array) ($stampDeploy['warnings'] ?? []), static fn($w): bool => str_contains((string) $w, 'stamp_new')), 'no marker warning with stamp_new');
+    S::check($effectiveBarHeight($migrated($stampDocId)['top'][0] ?? []) === '100px', 'the bar is 100px again');
+}
+
+$grid = static fn(array $extra = []): array => [array_merge([
+    '_type'    => 'section',
+    '_modules' => [array_merge([
+        '_type'                        => 'layout-grid',
+        'layout_grid_template_columns' => '1fr 1fr 1fr',
+        '_modules'                     => [
+            ['_type' => 'layout-cell', '_modules' => [['_type' => 'text', 'text_content' => "PE-TEST-GRID-{$run}"]]],
+        ],
+    ], $extra)],
+])];
+
+$gridTitle = "PE TEST Stamped grid {$run}";
+$gridPage = S::ok(S::call('create_page', ['title' => $gridTitle, 'layout_data' => $grid()]), 'create a page with a three-column grid');
+$gridPageId = (int) ($gridPage['post_id'] ?? 0);
+
+if ($gridPageId > 0) {
+    S::track('page', $gridPageId, $gridTitle);
+    S::same(['elements' => 4, '_m' => 4, '_bp_base' => 4], $gridPage['stamped'] ?? null, 'create_page reports the stamps');
+    $loadedGrid = $migrated($gridPageId)[0]['_modules'][0] ?? [];
+    S::check(($loadedGrid['layout_grid_template_columns'] ?? null) === '1fr 1fr 1fr' && ! isset($loadedGrid['_bp_data' . $siteTag]), 'a stamped grid keeps its columns after Cornerstone loads it', (string) wp_json_encode($loadedGrid));
+
+    $added = S::ok(S::call('update_layout', [
+        'post_id'    => $gridPageId,
+        'operations' => [
+            ['op' => 'add', 'path' => '0._modules.0._modules.1', 'value' => ['_type' => 'layout-cell', '_modules' => [['_type' => 'text', 'text_content' => 'PE TEST added']]]],
+            ['op' => 'update', 'path' => '0', 'value' => ['_label' => 'PE Test Grid Section']],
+        ],
+    ]), 'add a cell with update_layout');
+    $storedGrid = S::layout($gridPageId)[0]['_modules'][0] ?? [];
+    $cell = $storedGrid['_modules'][1] ?? [];
+    S::check(($cell['_m'] ?? null) === ['e' => 1] && ($cell['_bp_base'] ?? null) === $siteTag && ($cell['_modules'][0]['_m'] ?? null) === ['e' => 1], 'the added cell and its text are stamped', (string) wp_json_encode($cell));
+    S::same(['elements' => 2, '_m' => 2, '_bp_base' => 2], $added['stamped'] ?? null, 'update_layout reports the stamps of the added elements only');
+}
+
+$plainTitle = "PE TEST Unstamped grid {$run}";
+$plainPage = S::ok(S::call('create_page', ['title' => $plainTitle, 'layout_data' => $grid(), 'stamp_new' => false]), 'create a page with stamp_new: false');
+
+if (isset($plainPage['post_id'])) {
+    $plainId = (int) $plainPage['post_id'];
+    S::track('page', $plainId, $plainTitle);
+    S::same($grid(), S::layout($plainId), 'stamp_new: false stores the layout as sent');
+    $loadedGrid = $migrated($plainId)[0]['_modules'][0] ?? [];
+    S::check(($loadedGrid['layout_grid_template_columns'] ?? null) !== '1fr 1fr 1fr', 'unmarked, Cornerstone overwrites the grid columns (why stamps matter)', (string) ($loadedGrid['layout_grid_template_columns'] ?? 'null'));
+}
+
+$keptPage = S::ok(S::call('create_page', ['title' => "PE TEST Kept markers {$run}", 'layout_data' => $grid(['_m' => ['e' => 1], '_bp_base' => '3_4'])]), 'create a page whose grid already has markers');
+
+if (isset($keptPage['post_id'])) {
+    S::track('page', (int) $keptPage['post_id'], "PE TEST Kept markers {$run}");
+    $storedGrid = S::layout((int) $keptPage['post_id'])[0]['_modules'][0] ?? [];
+    S::check(($storedGrid['_bp_base'] ?? null) === '3_4' && ($storedGrid['_m'] ?? null) === ['e' => 1], 'existing markers are kept', (string) wp_json_encode($storedGrid));
 }
 
 // Done -----------------------------------------------------------------------------
