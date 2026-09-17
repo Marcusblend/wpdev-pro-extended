@@ -14,6 +14,7 @@ use ProExtended\Mcp\Tools\AnnotatedToolInterface;
 use ProExtended\Mcp\Tools\ToolInterface;
 use ProExtended\Media\MediaImporter;
 use ProExtended\Settings\SettingsBackups;
+use ProExtended\Settings\ThemeOptionsReader;
 use ProExtended\Site\Health;
 use ProExtended\Site\HostCache;
 use ProExtended\Support\Json;
@@ -414,6 +415,9 @@ TXT;
             'list_menus'               => static fn() => new Tools\ListMenus(),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
             'restore_settings'         => static fn() => new Tools\RestoreSettings($backups),
+
+            // Builder parity (1.2.0).
+            'get_theme_options'        => static fn() => new Tools\GetThemeOptions(new ThemeOptionsReader(), $elements),
         ];
 
         foreach ($factories as $name => $factory) {

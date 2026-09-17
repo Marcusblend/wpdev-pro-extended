@@ -165,7 +165,7 @@ $baseline = [
     'clear_cache'        => [['post_id' => 'integer'], []],
     'update_layout'      => [['post_id' => 'integer', 'operations' => 'array', 'skip_validation' => 'boolean'], ['post_id', 'operations']],
 ];
-$newTools = ['create_document', 'update_document_settings', 'list_components', 'get_global_css', 'set_global_css', 'set_colors', 'set_fonts', 'upload_media', 'list_menus', 'list_settings_backups', 'restore_settings'];
+$newTools = ['create_document', 'update_document_settings', 'list_components', 'get_global_css', 'set_global_css', 'set_colors', 'set_fonts', 'upload_media', 'list_menus', 'list_settings_backups', 'restore_settings', 'get_theme_options'];
 
 $list = S::rpc('tools/list');
 $tools = [];
@@ -174,8 +174,8 @@ foreach ((array) ($list['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 25, 'lists 25 tools', (string) count($tools));
-S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 11 new tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
+S::check(count($tools) === 26, 'lists 26 tools', (string) count($tools));
+S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 12 newer tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 S::check(($tools['upload_media']['annotations']['openWorldHint'] ?? null) === true, 'upload_media is open-world');
 S::check(count(array_filter($tools, static fn($t) => ($t['annotations']['openWorldHint'] ?? null) === true)) === 1, 'no other tool is open-world');

@@ -47,7 +47,8 @@ foreach ((array) (S::rpc('tools/list')['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 25, 'lists 25 tools', (string) count($tools));
+S::check(count($tools) === 26, 'lists 26 tools', (string) count($tools));
+S::check(isset($tools['get_theme_options']) && ($tools['get_theme_options']['annotations']['readOnlyHint'] ?? null) === true, 'get_theme_options is listed as read-only');
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 
 $init = S::rpc('initialize', ['protocolVersion' => '2025-03-26', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pe-smoke', 'version' => '1']]);
@@ -324,6 +325,56 @@ S::check(! $fakeInfo['is_error'] && ! str_contains($fakeInfo['text'], $fakeSecre
 $fakePackage = $fakeData['features']['max']['packages'][0] ?? [];
 S::check(($fakePackage['slug'] ?? null) === 'pe-test-max' && ($fakePackage['version'] ?? null) === '9.9.9' && ($fakePackage['installed'] ?? null) === false, 'a Max package is summarized', (string) wp_json_encode($fakePackage));
 S::check(($fakeData['features']['external_api']['allowlist_entries'] ?? null) === 2 && ($fakeData['features']['external_api']['entries_with_extra_spaces'] ?? null) === 1 && ($fakeData['features']['external_api']['entries_without_final_slash'] ?? null) === 1 && ($fakeData['features']['external_api']['global_endpoints'] ?? null) === 1, 'the allowlist is described, not listed', (string) wp_json_encode($fakeData['features']['external_api'] ?? null));
+
+// 22. Theme options ------------------------------------------------------------------
+
+S::section('22 get_theme_options');
+
+$themeOptionsBefore = [];
+
+foreach (['cs_option_data', 'x_stack', 'x_breakpoint_base', 'x_breakpoint_ranges'] as $option) {
+    $themeOptionsBefore[$option] = S::rawOption($option);
+}
+
+$overview = S::ok(S::call('get_theme_options'), 'get_theme_options overview');
+$sectionTags = array_column((array) ($overview['sections'] ?? []), 'tag');
+S::check(($overview['total_keys'] ?? 0) > 50 && isset($overview['sections'], $overview['breakpoints']) && ! isset($overview['options']), 'the overview lists sections without values', 'keys ' . ($overview['total_keys'] ?? 'null'));
+S::check(in_array('typography', $sectionTags, true) && in_array('layout-and-design', $sectionTags, true), 'the panel sections are found', implode(', ', $sectionTags));
+S::check(($overview['breakpoints']['tag'] ?? null) === pro_extended()->elementContext()->breakpointTag() && in_array('x_layout_site_width', (array) ($overview['breakpoints']['responsive_keys'] ?? []), true), 'the breakpoint tag and responsive keys are reported', (string) wp_json_encode($overview['breakpoints'] ?? null));
+echo '      overview: ' . wp_json_encode(array_intersect_key($overview, array_flip(['stack', 'total_keys', 'changed']))) . ' sections ' . wp_json_encode(array_map(static fn($s) => $s['tag'] . ':' . $s['keys'] . '/' . $s['changed'], (array) ($overview['sections'] ?? []))) . "\n";
+
+$typography = S::ok(S::call('get_theme_options', ['section' => 'Typography']), 'read the typography section by label');
+$typoRows = [];
+
+foreach ((array) ($typography['options'] ?? []) as $row) {
+    $typoRows[$row['key']] = $row;
+}
+
+S::check(($typography['section'] ?? null) === 'typography' && isset($typoRows['x_body_font_family_selection']), 'the section lists its keys', (string) count($typoRows));
+$bodyFont = $typoRows['x_body_font_family_selection'] ?? [];
+S::check(array_key_exists('value', $bodyFont) && array_key_exists('default', $bodyFont) && is_bool($bodyFont['changed'] ?? null) && is_string($bodyFont['label'] ?? null), 'each option has a label, value, default and changed flag', (string) wp_json_encode($bodyFont));
+
+$named = S::ok(S::call('get_theme_options', ['keys' => ['x_layout_site_width', 'x_custom_styles', 'pe_test_no_such_key']]), 'read named keys');
+$namedRows = array_column((array) ($named['options'] ?? []), null, 'key');
+S::check(($namedRows['x_layout_site_width']['responsive'] ?? null) === true && array_key_exists('breakpoint_values', $namedRows['x_layout_site_width'] ?? []), 'a responsive option has breakpoint values', (string) wp_json_encode($namedRows['x_layout_site_width'] ?? null));
+S::check(S::isNull((array) ($namedRows['x_custom_styles'] ?? []), 'value') && is_int($namedRows['x_custom_styles']['bytes'] ?? null), 'Global CSS is reported by size only', (string) wp_json_encode($namedRows['x_custom_styles'] ?? null));
+S::check(($named['unknown_keys'] ?? null) === ['pe_test_no_such_key'], 'unknown keys are listed');
+
+$fakeKey = 'PE-TEST-THEME-SECRET-' . wp_generate_password(10, false);
+$fakeEndpoints = static fn(): array => [['name' => 'PE TEST', 'headers' => 'Authorization: ' . $fakeKey]];
+add_filter('pre_option_cs_api_endpoints', $fakeEndpoints);
+$searched = S::call('get_theme_options', ['search' => 'api']);
+remove_filter('pre_option_cs_api_endpoints', $fakeEndpoints);
+S::check(! $searched['is_error'] && ! str_contains($searched['text'], $fakeKey), 'endpoint headers are never returned');
+
+$changed = S::ok(S::call('get_theme_options', ['changed_only' => true]), 'read changed options');
+S::check(($changed['count'] ?? -1) === ($overview['changed'] ?? -2), 'changed_only returns every changed option', ($changed['count'] ?? 'null') . ' vs ' . ($overview['changed'] ?? 'null'));
+S::isError(S::call('get_theme_options', ['section' => 'pe-test-no-such-section']), 'an unknown section is rejected', 'Unknown section');
+S::isError(S::call('get_theme_options', ['keys' => 'x_stack']), 'keys must be a list', 'must be an object or array');
+
+foreach ($themeOptionsBefore as $option => $before) {
+    S::check(S::rawOption($option) === $before, "{$option} is unchanged by the reads");
+}
 
 // 20. Validator warning codes --------------------------------------------------------
 
