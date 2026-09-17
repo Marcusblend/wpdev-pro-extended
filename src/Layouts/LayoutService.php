@@ -74,8 +74,9 @@ final class LayoutService
     /**
      * How the most recent save() wrote its data.
      *
-     * `path` is "cornerstone-api" when Cornerstone's Document API (or, for
-     * pages, its save hook) was used and "fallback" otherwise.
+     * `path` is "cornerstone-api" when Cornerstone's Document API was used
+     * (for page restores: its content rebuild and save hook) and "fallback"
+     * otherwise.
      *
      * @return array{path: string|null, warnings: string[]}
      */
@@ -302,10 +303,13 @@ final class LayoutService
             // served from it on sites running Redis/Memcached.
             wp_cache_delete($postId, 'post_meta');
 
-            // post_content holds the compiled HTML that Cornerstone actually
-            // renders. Restoring the builder data alone leaves the *previous*
-            // layout on the front end while the builder shows the restored one.
-            $this->renderToPostContent($postId);
+            // post_content holds a rendered copy of the layout (or its
+            // shortcodes). Rebuild it in the site's storage mode, the way
+            // Cornerstone's storage migration does, so it matches the restored
+            // data; render HTML directly when Cornerstone cannot.
+            if ($this->gateway->rebuildPageContent($postId) === null) {
+                $this->renderToPostContent($postId);
+            }
         } else {
             $written = $wpdb->update(
                 $wpdb->posts,
@@ -571,53 +575,83 @@ final class LayoutService
             throw new \RuntimeException('Failed to encode layout data as JSON.');
         }
 
-        $result = false;
+        $warnings = [];
 
-        if ($source === 'post_meta') {
-            // CRITICAL: wp_slash() prevents update_post_meta() from corrupting JSON.
-            $existing = get_post_meta($post->ID, '_cornerstone_data', true);
-            $result = update_post_meta($post->ID, '_cornerstone_data', wp_slash($json));
+        // Pro renders Cornerstone pages with its blank template. Set it before
+        // saving: Cornerstone's save writes the page template back.
+        $this->ensurePageTemplate($post->ID);
 
-            // update_post_meta() returns false both on failure and when the value
-            // is unchanged. Deploying an identical layout is a success, not a
-            // failure, so disambiguate the two.
-            if ($result === false) {
-                $result = ($existing === $json);
+        if (is_array($data) && array_is_list($data)) {
+            // Write the way the builder does (Content::updateElements()).
+            $saved = $this->gateway->savePage($post->ID, $data, $warnings);
+
+            if ($saved !== null) {
+                $this->lastWrite = ['path' => $saved['path'], 'warnings' => $warnings];
+
+                return true;
             }
-
-            // Ensure Cornerstone settings meta exists — this is required for rendering.
-            // Without it, Cornerstone won't recognize the page as a Cornerstone page.
-            $existingSettings = get_post_meta($post->ID, '_cornerstone_settings', true);
-            if (empty($existingSettings)) {
-                $defaultSettings = wp_json_encode([
-                    'customCSS'       => '',
-                    'customJS'        => '',
-                    'layoutSingle'    => 'default',
-                    'layoutHeader'    => 'default',
-                    'layoutFooter'    => 'default',
-                    'responsive_text' => [],
-                ]);
-                update_post_meta($post->ID, '_cornerstone_settings', wp_slash($defaultSettings));
-            }
-
-            // Ensure page template is set for Pro theme rendering.
-            $currentTemplate = get_post_meta($post->ID, '_wp_page_template', true);
-            if (empty($currentTemplate) || $currentTemplate === 'default') {
-                update_post_meta($post->ID, '_wp_page_template', 'template-blank-4.php');
-            }
-
-            // Compile layout data into rendered HTML and store in post_content.
-            $this->renderToPostContent($post->ID);
+        } else {
+            $warnings[] = 'The page data is not a list of elements, so it was written directly.';
         }
+
+        // Direct write: used when Cornerstone's document API is unavailable,
+        // forced off, or failed before it stored anything.
+
+        // CRITICAL: wp_slash() prevents update_post_meta() from corrupting JSON.
+        $existing = get_post_meta($post->ID, '_cornerstone_data', true);
+        $result = update_post_meta($post->ID, '_cornerstone_data', wp_slash($json));
+
+        // update_post_meta() returns false both on failure and when the value
+        // is unchanged. Deploying an identical layout is a success, not a
+        // failure, so disambiguate the two.
+        if ($result === false) {
+            $result = ($existing === $json);
+        }
+
+        // Ensure Cornerstone settings meta exists — this is required for rendering.
+        // Without it, Cornerstone won't recognize the page as a Cornerstone page.
+        $existingSettings = get_post_meta($post->ID, '_cornerstone_settings', true);
+        if (empty($existingSettings)) {
+            $defaultSettings = wp_json_encode([
+                'customCSS'       => '',
+                'customJS'        => '',
+                'layoutSingle'    => 'default',
+                'layoutHeader'    => 'default',
+                'layoutFooter'    => 'default',
+                'responsive_text' => [],
+            ]);
+            update_post_meta($post->ID, '_cornerstone_settings', wp_slash($defaultSettings));
+        }
+
+        // A page edited in the WordPress editor after Cornerstone carries an
+        // override flag that stops Cornerstone rendering it; a Cornerstone save
+        // clears it.
+        delete_post_meta($post->ID, '_cornerstone_override');
+
+        // Compile layout data into rendered HTML and store in post_content.
+        $this->renderToPostContent($post->ID);
 
         // Clear TSS cache so Cornerstone regenerates compiled CSS.
         delete_post_meta($post->ID, '_cs_generated_tss');
 
         // Fire the builder's save hook (last-save timestamps, Google Fonts
         // request cache, document asset meta).
-        $this->lastWrite = ['path' => $this->gateway->firePageSaved($post->ID)['path'], 'warnings' => []];
+        $this->lastWrite = ['path' => $this->gateway->firePageSaved($post->ID)['path'], 'warnings' => $warnings];
 
         return (bool) $result;
+    }
+
+    /**
+     * Give a page without a template Pro's blank template, which Cornerstone
+     * pages render with.
+     */
+    private function ensurePageTemplate(int $postId): void
+    {
+        $currentTemplate = get_post_meta($postId, '_wp_page_template', true);
+
+        if (empty($currentTemplate) || $currentTemplate === 'default') {
+            update_post_meta($postId, '_wp_page_template', 'template-blank-4.php');
+        }
     }
 
     /**

@@ -25,6 +25,20 @@ echo "Pro Extended smoke tests (write suite), run {$run}, PE " . PE_VERSION . "\
 
 $forceFallback = static fn(): bool => true;
 
+// Options: image_url=<https URL> for upload_media; local=1 on a disposable
+// local site only (enables checks that change how Cornerstone stores pages
+// for the rest of the request).
+$suiteOptions = [];
+
+foreach ((array) ($args ?? []) as $arg) {
+    if (is_string($arg) && str_contains($arg, '=')) {
+        [$optionKey, $optionValue] = explode('=', $arg, 2);
+        $suiteOptions[$optionKey] = $optionValue;
+    }
+}
+
+$localSite = ($suiteOptions['local'] ?? '') === '1' && wp_get_environment_type() === 'local';
+
 // Fixtures -------------------------------------------------------------------
 
 $text = static fn(string $region, string $content): array => ['_type' => 'text', '_region' => $region, 'text_content' => $content];
@@ -1011,15 +1025,6 @@ try {
 
 S::section('8 upload_media');
 
-$suiteOptions = [];
-
-foreach ((array) ($args ?? []) as $arg) {
-    if (is_string($arg) && str_contains($arg, '=')) {
-        [$optionKey, $optionValue] = explode('=', $arg, 2);
-        $suiteOptions[$optionKey] = $optionValue;
-    }
-}
-
 $imageUrl = (string) ($suiteOptions['image_url'] ?? 'https://s.w.org/style/images/about/WordPress-logotype-wmark.png');
 $trackMedia = static function (array $result, string $title): void {
     foreach ((array) ($result['items'] ?? []) as $item) {
@@ -1313,6 +1318,119 @@ S::check(array_filter((array) ($all['layouts'] ?? []), static fn($row): bool => 
 
 $backups = S::ok(S::call('list_settings_backups'), 'list_settings_backups');
 S::check(is_array($backups['backups'] ?? null), 'list_settings_backups returns a list');
+
+// 20. Page saves through Cornerstone ------------------------------------------------
+
+S::section('20 page saves through Cornerstone');
+
+$hookCounts = [];
+$countHooks = ['cs_save_document', 'cornerstone_before_save_content', 'cornerstone_after_save_content'];
+
+foreach ($countHooks as $hook) {
+    add_action($hook, static function () use (&$hookCounts, $hook): void {
+        $hookCounts[$hook] = ($hookCounts[$hook] ?? 0) + 1;
+    });
+}
+
+$savePageTitle = "PE TEST Page save \\ {$run}";
+$saveLayout = $pageLayout([['_type' => 'text', 'text_content' => "PE-TEST-SAVE-A-{$run}"]]);
+$savePage = S::ok(S::call('create_page', ['title' => $savePageTitle, 'layout_data' => $saveLayout]), 'create a page with layout data');
+$savePageId = (int) ($savePage['post_id'] ?? 0);
+
+if ($savePageId > 0) {
+    S::track('page', $savePageId, $savePageTitle);
+    S::check(($savePage['write_path'] ?? null) === 'cornerstone-api', 'create_page wrote through cornerstone-api', (string) wp_json_encode($savePage));
+    clean_post_cache($savePageId);
+    S::check(S::postField($savePageId, 'post_title') === $savePageTitle, 'a backslash in the title survives the save', (string) S::postField($savePageId, 'post_title'));
+
+    update_post_meta($savePageId, '_cornerstone_override', '1');
+    delete_post_meta($savePageId, '_cs_last_save');
+    $hookCounts = [];
+    $saveLayout[0]['_modules'][0]['_modules'][0]['_modules'][0]['text_content'] = "PE-TEST-SAVE-B-{$run}";
+    $saved = S::ok(S::call('deploy_layout', ['post_id' => $savePageId, 'layout_data' => $saveLayout]), 'deploy to the page');
+    wp_cache_delete($savePageId, 'post_meta');
+    clean_post_cache($savePageId);
+
+    S::check(($saved['write_path'] ?? null) === 'cornerstone-api', 'deploy_layout wrote through cornerstone-api', (string) wp_json_encode($saved));
+    S::check(get_post_meta($savePageId, '_cornerstone_override', true) === '', 'the _cornerstone_override flag is removed');
+    $fired = [];
+
+    foreach ($countHooks as $hook) {
+        $fired[$hook] = $hookCounts[$hook] ?? 0;
+    }
+
+    S::same(array_fill_keys($countHooks, 1), $fired, 'the save hooks fire once each');
+    S::check(get_post_meta($savePageId, '_cs_last_save', true) !== '', '_cs_last_save is set');
+    S::check(get_post_meta($savePageId, '_wp_page_template', true) === 'template-blank-4.php', 'the page keeps the blank template');
+    S::same($saveLayout, S::layout($savePageId), 'the page returns the deployed layout');
+
+    $content = (string) S::postField($savePageId, 'post_content');
+    $htmlMode = (bool) get_option('cs_document_build_as_html', true);
+
+    if ($htmlMode) {
+        S::check(str_starts_with($content, '<!-- cs-content -->') && str_contains($content, "PE-TEST-SAVE-B-{$run}") && ! str_contains($content, "PE-TEST-SAVE-A-{$run}"), 'post_content holds the new rendered HTML (HTML storage)', substr($content, 0, 120));
+    } else {
+        S::check(str_starts_with($content, "[cs_content _p='{$savePageId}']") && str_contains($content, "PE-TEST-SAVE-B-{$run}"), 'post_content holds the new shortcodes (shortcode storage)', substr($content, 0, 120));
+    }
+
+    $settings = json_decode((string) get_post_meta($savePageId, '_cornerstone_settings', true), true);
+    S::check(is_array($settings) && ($settings['layoutSingle'] ?? null) === 'default' && array_key_exists('responsive_text', $settings), 'the page has Cornerstone settings', (string) wp_json_encode($settings));
+
+    $patched = S::ok(S::call('update_layout', [
+        'post_id'    => $savePageId,
+        'operations' => [['op' => 'update', 'path' => '0._modules.0._modules.0._modules.0', 'value' => ['text_content' => "PE-TEST-SAVE-C-{$run}"]]],
+    ]), 'update_layout on the page');
+    S::check(($patched['write_path'] ?? null) === 'cornerstone-api' && str_contains((string) S::postField($savePageId, 'post_content'), "PE-TEST-SAVE-C-{$run}"), 'update_layout wrote through cornerstone-api and rebuilt post_content', (string) wp_json_encode($patched));
+
+    $restored = S::ok(S::call('restore_layout', ['post_id' => $savePageId, 'backup_id' => (string) ($saved['backup_id'] ?? '')]), 'restore the page from its first backup');
+    clean_post_cache($savePageId);
+    $content = (string) S::postField($savePageId, 'post_content');
+    S::check(($restored['write_path'] ?? null) === 'cornerstone-api' && str_contains($content, "PE-TEST-SAVE-A-{$run}") && ! str_contains($content, "PE-TEST-SAVE-C-{$run}"), 'restore_layout rebuilt post_content from the restored data', (string) wp_json_encode($restored));
+
+    add_filter('pe_force_fallback', $forceFallback);
+    update_post_meta($savePageId, '_cornerstone_override', '1');
+    $saveLayout[0]['_modules'][0]['_modules'][0]['_modules'][0]['text_content'] = "PE-TEST-SAVE-D-{$run}";
+    $fallback = S::ok(S::call('deploy_layout', ['post_id' => $savePageId, 'layout_data' => $saveLayout]), 'deploy to the page with pe_force_fallback on');
+    remove_filter('pe_force_fallback', $forceFallback);
+    wp_cache_delete($savePageId, 'post_meta');
+    clean_post_cache($savePageId);
+    S::check(($fallback['write_path'] ?? null) === 'fallback', 'the fallback path was used', (string) wp_json_encode($fallback));
+    S::check(get_post_meta($savePageId, '_cornerstone_override', true) === '' && str_contains((string) S::postField($savePageId, 'post_content'), "PE-TEST-SAVE-D-{$run}"), 'the fallback also clears the override and renders the page');
+    S::same($saveLayout, S::layout($savePageId), 'the fallback stores the layout');
+
+    if ($localSite) {
+        // Shortcode storage, for this request only (nothing is stored).
+        $shortcodes = static fn(): string => '0';
+        add_filter('pre_option_cs_document_build_as_html', $shortcodes);
+        $saveLayout[0]['_modules'][0]['_modules'][0]['_modules'][0]['text_content'] = "PE-TEST-SAVE-E-{$run}";
+        $short = S::ok(S::call('deploy_layout', ['post_id' => $savePageId, 'layout_data' => $saveLayout]), 'deploy to the page with shortcode storage (local site)');
+        remove_filter('pre_option_cs_document_build_as_html', $shortcodes);
+        clean_post_cache($savePageId);
+        $content = (string) S::postField($savePageId, 'post_content');
+        S::check(($short['write_path'] ?? null) === 'cornerstone-api' && str_starts_with($content, "[cs_content _p='{$savePageId}']") && str_ends_with($content, '[/cs_content]') && ! str_contains($content, '<!-- cs-content -->'), 'post_content holds [cs_content] shortcodes', substr($content, 0, 120));
+        S::check(str_contains($content, "PE-TEST-SAVE-E-{$run}"), 'the shortcodes carry the new content');
+
+        S::ok(S::call('deploy_layout', ['post_id' => $savePageId, 'layout_data' => $saveLayout]), 'deploy again with HTML storage');
+        clean_post_cache($savePageId);
+        S::check(str_starts_with((string) S::postField($savePageId, 'post_content'), '<!-- cs-content -->'), 'post_content is HTML again');
+    } else {
+        S::skip('shortcode storage', 'runs only with local=1 on a local site');
+    }
+
+    $post = get_post($savePageId);
+    S::check($post instanceof WP_Post && $post->post_status === 'draft' && $post->post_title === $savePageTitle, 'the page stays a draft with its title');
+}
+
+$legacyTitle = "PE TEST Page tabs {$run}";
+$tabsLayout = $pageLayout([['_type' => 'tabs', '_modules' => [['_type' => 'tab', 'tab_label_content' => 'PE TEST tab', 'tab_content' => 'PE TEST tab content']]]]);
+$tabsPage = S::ok(S::call('create_page', ['title' => $legacyTitle, 'layout_data' => $tabsLayout]), 'create a page with tabs');
+
+if (isset($tabsPage['post_id'])) {
+    S::track('page', (int) $tabsPage['post_id'], $legacyTitle);
+    $storedTabs = S::layout((int) $tabsPage['post_id']);
+    $storedTab = $storedTabs[0]['_modules'][0]['_modules'][0]['_modules'][0]['_modules'][0] ?? [];
+    S::check(($storedTab['tab_label_content'] ?? null) === 'PE TEST tab', 'tabs keep their content through the save', (string) wp_json_encode($storedTab));
+}
 
 // Done -----------------------------------------------------------------------------
 

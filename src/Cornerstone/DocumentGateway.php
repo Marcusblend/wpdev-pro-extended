@@ -10,10 +10,12 @@ use ProExtended\Support\Json;
  * The single place Pro Extended calls into Cornerstone internals.
  *
  * Writes go through Cornerstone's own Document API when it is available, so
- * they fire the same hooks the builder fires (`cs_save_document`,
- * `cs_save_{type}`, `cs_purge_tmp`) and every cache Cornerstone keeps stays
- * correct. When the API is missing or fails, a direct write that produces the
- * same stored shape is used instead, followed by the same cache clean-up.
+ * they fire the same hooks the builder fires (documents: `cs_save_document`,
+ * `cs_save_{type}` and, for components, `cs_purge_tmp`; pages:
+ * `cs_save_document` and the before/after content hooks) and every cache
+ * Cornerstone keeps stays correct. When the API is missing or fails, a direct
+ * write that produces the same stored shape is used instead, followed by the
+ * same cache clean-up.
  *
  * Every call into Cornerstone is guarded with class_exists()/method_exists(),
  * and the `pe_force_fallback` filter forces the direct path (for tests).
@@ -69,6 +71,7 @@ final class DocumentGateway
 
     private const DOCUMENT_CLASS     = 'Themeco\\Cornerstone\\Documents\\Document';
     private const GLOBAL_BLOCK_CLASS = 'Themeco\\Cornerstone\\Documents\\GlobalBlock';
+    private const CONTENT_CLASS      = 'Themeco\\Cornerstone\\Documents\\Content';
 
     /**
      * Settings Cornerstone 7.9.4 persists in post_content, with their class
@@ -832,10 +835,150 @@ final class DocumentGateway
     }
 
     /**
+     * Save a content post's (page, post, ...) elements the way the builder
+     * does.
+     *
+     * Document::save() runs Content::updateElements(), which stores the
+     * elements, clears `_cornerstone_override`, fires
+     * `cornerstone_before_save_content` and `cornerstone_after_save_content`,
+     * and rebuilds post_content in the site's storage mode (rendered HTML or
+     * [cs_content] shortcodes); the save then fires `cs_save_document` once.
+     *
+     * Returns null when the caller should write directly instead: the API is
+     * unavailable or forced off, the post type is not registered, or
+     * Cornerstone failed before it stored anything. The reason is added to
+     * $warnings.
+     *
+     * @param  array<int, mixed> $elements
+     * @param  string[]          $warnings
+     * @return array{path: string}|null
+     */
+    public function savePage(int $id, array $elements, array &$warnings): ?array
+    {
+        if (! $this->apiAvailable() || ! class_exists(self::CONTENT_CLASS)) {
+            return null;
+        }
+
+        $post = get_post($id);
+
+        if (! $post instanceof \WP_Post) {
+            throw new \InvalidArgumentException(sprintf('Post %d does not exist.', $id));
+        }
+
+        if (! post_type_exists($post->post_type)) {
+            $warnings[] = sprintf('Post type "%s" is not registered, so the page was written directly.', $post->post_type);
+
+            return null;
+        }
+
+        $previousPost = $GLOBALS['post'] ?? null;
+        $documentSaves = did_action('cs_save_document');
+        $contentSaves = did_action('cornerstone_after_save_content');
+        $doc = null;
+
+        // Cornerstone renders post_content from its per-request document cache,
+        // so a copy of this page loaded earlier in the request must go first.
+        $this->clearResolverCache($id);
+
+        try {
+            $class = '\\' . self::DOCUMENT_CLASS;
+            $doc = $class::locate($id);
+
+            if (! is_a($doc, self::CONTENT_CLASS) || ! method_exists($doc, 'updateElements')) {
+                throw new \RuntimeException('Cornerstone did not load the post as content');
+            }
+
+            $doc->update([
+                'elements' => $elements,
+                'settings' => $this->slashedPostFields($post),
+            ]);
+
+            $result = $doc->save();
+
+            if (is_wp_error($result)) {
+                throw new \RuntimeException($result->get_error_message());
+            }
+        } catch (\Throwable $e) {
+            if (did_action('cornerstone_after_save_content') <= $contentSaves) {
+                $warnings[] = 'Cornerstone\'s document API failed (' . $e->getMessage() . '); the page was written directly.';
+
+                return null;
+            }
+
+            // The elements and post_content were stored; a later step (the
+            // featured image, or reloading the saved document) failed.
+            $warnings[] = 'Cornerstone reported an error after saving the page (' . $e->getMessage() . ').';
+
+            if (did_action('cs_save_document') <= $documentSaves && is_object($doc)) {
+                do_action('cs_save_document', $doc);
+            }
+        } finally {
+            $GLOBALS['post'] = $previousPost;
+            $this->clearResolverCache($id);
+        }
+
+        $this->touchLastSave($id);
+
+        return ['path' => self::PATH_API];
+    }
+
+    /**
+     * Rebuild a content post's post_content from its stored elements in the
+     * site's storage mode, the way Cornerstone's storage migration does
+     * (Content::updateElements() without rewriting the stored elements).
+     *
+     * Returns null when Cornerstone cannot do it; the caller then renders the
+     * HTML itself.
+     *
+     * @return array{path: string}|null
+     */
+    public function rebuildPageContent(int $id): ?array
+    {
+        if (! $this->apiAvailable() || ! class_exists(self::CONTENT_CLASS)) {
+            return null;
+        }
+
+        $post = get_post($id);
+
+        if (! $post instanceof \WP_Post || ! post_type_exists($post->post_type)) {
+            return null;
+        }
+
+        $elements = Json::decodeStored(get_post_meta($id, '_cornerstone_data', true));
+        $settings = Json::decodeStored(get_post_meta($id, '_cornerstone_settings', true)) ?? [];
+
+        if ($elements === null) {
+            return null;
+        }
+
+        $previousPost = $GLOBALS['post'] ?? null;
+        $this->clearResolverCache($id);
+
+        try {
+            $class = '\\' . self::DOCUMENT_CLASS;
+            $doc = $class::locate($id);
+
+            if (! is_a($doc, self::CONTENT_CLASS) || ! method_exists($doc, 'updateElements')) {
+                return null;
+            }
+
+            $result = $doc->updateElements($elements, $settings, false);
+
+            return $result === true ? ['path' => self::PATH_API] : null;
+        } catch (\Throwable) {
+            return null;
+        } finally {
+            $GLOBALS['post'] = $previousPost;
+            $this->clearResolverCache($id);
+        }
+    }
+
+    /**
      * After a page's Cornerstone data is written: fire `cs_save_document` the
-     * way the builder does (its listeners only refresh the last-save
-     * timestamps, the Google Fonts request cache and the document's asset
-     * meta, which is written back unchanged).
+     * way the builder does (its listeners refresh the `cs_last_save` option,
+     * the Google Fonts request cache and the document's asset meta, which is
+     * written back unchanged), and set the page's `_cs_last_save` meta, which
+     * Cornerstone only sets during its own REST requests.
      *
      * @return array{path: string}
      */
@@ -851,6 +994,7 @@ final class DocumentGateway
                 if (is_object($doc)) {
                     do_action('cs_save_document', $doc);
                     $this->clearResolverCache($id);
+                    $this->touchLastSave($id);
 
                     return ['path' => self::PATH_API];
                 }
@@ -859,12 +1003,21 @@ final class DocumentGateway
             }
         }
 
-        $now = current_time('mysql');
-        update_option('cs_last_save', $now);
-        update_post_meta($id, '_cs_last_save', $now);
+        $this->touchLastSave($id);
         delete_option('x_cache_google_fonts_request');
 
         return ['path' => self::PATH_FALLBACK];
+    }
+
+    /**
+     * Set the last-save timestamps the builder sets: the `cs_last_save`
+     * option and the post's `_cs_last_save` meta.
+     */
+    public function touchLastSave(int $id): void
+    {
+        $now = current_time('mysql');
+        update_option('cs_last_save', $now);
+        update_post_meta($id, '_cs_last_save', $now);
     }
 
     // ─── Caches ──────────────────────────────────────────────────────────────
@@ -1226,6 +1379,30 @@ final class DocumentGateway
     }
 
     /**
+     * The post fields Content::save() writes back, slashed.
+     *
+     * Content::save() hands them to wp_update_post() unslashed, and WordPress
+     * unslashes what it is given, so a backslash in a title or excerpt would
+     * be lost. Passing the current values slashed stores them unchanged.
+     *
+     * @return array<string, string>
+     */
+    private function slashedPostFields(\WP_Post $post): array
+    {
+        $fields = [];
+
+        if (post_type_supports($post->post_type, 'title')) {
+            $fields['general_post_title'] = wp_slash($post->post_title);
+        }
+
+        if (post_type_supports($post->post_type, 'excerpt')) {
+            $fields['general_manual_excerpt'] = wp_slash($post->post_excerpt);
+        }
+
+        return $fields;
+    }
+
+    /**
      * @return string[]
      */
     private function identityKeys(string $docType): array
@@ -1438,9 +1615,7 @@ final class DocumentGateway
         delete_post_meta($post->ID, '_cs_generated_tss');
         delete_post_meta($post->ID, '_cs_generated_styles');
 
-        $now = current_time('mysql');
-        update_option('cs_last_save', $now);
-        update_post_meta($post->ID, '_cs_last_save', $now);
+        $this->touchLastSave($post->ID);
 
         clean_post_cache($post->ID);
         $this->clearResolverCache($post->ID);

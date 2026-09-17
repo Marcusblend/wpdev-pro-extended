@@ -179,6 +179,8 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
             throw new \RuntimeException('Failed to create page: ' . $postId->get_error_message());
         }
 
+        $writePath = null;
+
         // Save Cornerstone data if provided.
         if ($layout !== null) {
             try {
@@ -188,31 +190,38 @@ final class CreatePage implements ToolInterface, AnnotatedToolInterface
                 wp_delete_post($postId, true);
                 throw $e;
             }
+
+            $write = $this->layouts->lastWrite();
+            $writePath = $write['path'];
+            $warnings = array_merge($warnings, $write['warnings']);
         }
 
         if ($template !== null) {
             update_post_meta($postId, '_wp_page_template', $template);
         }
 
-        return $this->result($postId, true, $warnings);
+        return $this->result($postId, true, $warnings, $writePath);
     }
 
     /**
      * @param  string[] $warnings
      * @return array<string, mixed>
      */
-    private function result(int $postId, bool $created, array $warnings): array
+    private function result(int $postId, bool $created, array $warnings, ?string $writePath = null): array
     {
+        clean_post_cache($postId);
+
         return [
-            'post_id'  => $postId,
-            'title'    => get_the_title($postId),
-            'slug'     => get_post_field('post_name', $postId),
-            'status'   => get_post_status($postId),
-            'url'      => get_permalink($postId),
-            'created'  => $created,
-            'parent'   => (int) get_post_field('post_parent', $postId),
-            'template' => get_page_template_slug($postId) ?: 'default',
-            'warnings' => $warnings,
+            'post_id'    => $postId,
+            'title'      => get_the_title($postId),
+            'slug'       => get_post_field('post_name', $postId),
+            'status'     => get_post_status($postId),
+            'url'        => get_permalink($postId),
+            'created'    => $created,
+            'parent'     => (int) get_post_field('post_parent', $postId),
+            'template'   => get_page_template_slug($postId) ?: 'default',
+            'write_path' => $writePath,
+            'warnings'   => $warnings,
         ];
     }
 
