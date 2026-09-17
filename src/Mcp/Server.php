@@ -13,6 +13,7 @@ use ProExtended\Mcp\Resources\ResourceInterface;
 use ProExtended\Mcp\Tools\AnnotatedToolInterface;
 use ProExtended\Mcp\Tools\ToolInterface;
 use ProExtended\Media\MediaImporter;
+use ProExtended\Settings\ReferenceScanner;
 use ProExtended\Settings\SettingsBackups;
 use ProExtended\Settings\ThemeOptionsReader;
 use ProExtended\Site\Health;
@@ -409,8 +410,8 @@ TXT;
             'list_components'          => static fn() => new Tools\ListComponents($gateway),
             'get_global_css'           => static fn() => new Tools\GetGlobalCss($gateway),
             'set_global_css'           => static fn() => new Tools\SetGlobalCss($gateway, $backups),
-            'set_colors'               => static fn() => new Tools\SetColors($gateway, $backups),
-            'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups),
+            'set_colors'               => static fn() => new Tools\SetColors($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
+            'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),

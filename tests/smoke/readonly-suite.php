@@ -212,6 +212,24 @@ if ($lockedColor === null) {
 $dryNew = S::ok(S::call('set_colors', ['colors' => [['_id' => 'peTestA', 'title' => 'PE Test A', 'value' => '#123456']], 'group' => ['_id' => 'peTestGroup', 'title' => 'PE Test Group'], 'dry_run' => true]), 'dry run of a new color and group');
 S::check(($dryNew['added'] ?? null) === ['peTestA'] || ($dryNew['unchanged'] ?? 0) === 1, 'the dry run reports the addition', (string) wp_json_encode($dryNew));
 
+$firstColor = null;
+
+foreach ($colors as $item) {
+    if (is_array($item) && isset($item['_id']) && ! array_key_exists('children', $item)) {
+        $firstColor = (string) $item['_id'];
+        break;
+    }
+}
+
+if ($firstColor === null) {
+    S::skip('palette removal dry run', 'this site has no palette colors');
+} else {
+    $dryRemove = S::ok(S::call('set_colors', ['remove' => [$firstColor], 'allow_locked' => true, 'dry_run' => true]), "dry run of removing palette color {$firstColor}");
+    $use = (array) ($dryRemove['uses'][$firstColor] ?? []);
+    S::check(($dryRemove['dry_run'] ?? null) === true && ($dryRemove['removed'] ?? null) === [$firstColor] && is_int($use['count'] ?? null) && S::isNull($dryRemove, 'backup_id'), 'the dry run lists the uses and writes nothing', (string) wp_json_encode(array_diff_key($dryRemove, ['uses' => 1])));
+    echo "      {$firstColor} is used " . ($use['count'] ?? '?') . ' times in ' . count((array) ($use['locations'] ?? [])) . ' listed places' . "\n";
+}
+
 S::section('6 set_fonts dry runs');
 
 $fontItems = S::jsonOption('cornerstone_font_items') ?? [];
@@ -238,6 +256,18 @@ if ($lockedFont === null) {
         'it returns a diff that keeps the lock, and writes nothing',
         (string) wp_json_encode($dry)
     );
+}
+
+$fontIds = array_values(array_map('strval', array_column(array_filter($fontItems, static fn($i): bool => is_array($i) && isset($i['_id']) && ! array_key_exists('children', $i)), '_id')));
+
+if (count($fontIds) < 2) {
+    S::skip('font removal dry run', 'this site has fewer than two fonts');
+} else {
+    $dryFontRemove = S::ok(S::call('set_fonts', ['remove' => [$fontIds[0]], 'allow_locked' => true, 'dry_run' => true]), "dry run of removing font {$fontIds[0]}");
+    $fontUse = (array) ($dryFontRemove['uses'][$fontIds[0]] ?? []);
+    S::check(($dryFontRemove['dry_run'] ?? null) === true && ($dryFontRemove['removed'] ?? null) === [$fontIds[0]] && is_int($fontUse['count'] ?? null) && ($dryFontRemove['backup_ids'] ?? null) === [], 'the dry run lists the uses and writes nothing', (string) wp_json_encode(array_diff_key($dryFontRemove, ['uses' => 1])));
+    echo "      {$fontIds[0]} is used " . ($fontUse['count'] ?? '?') . ' times' . "\n";
+    S::isError(S::call('set_fonts', ['remove' => $fontIds, 'allow_locked' => true, 'force' => true, 'dry_run' => true]), 'removing every font is refused', 'At least one font');
 }
 
 $dryConfig = S::ok(S::call('set_fonts', ['config' => ['fontDisplay' => 'swap'], 'dry_run' => true]), 'dry run of a config change');

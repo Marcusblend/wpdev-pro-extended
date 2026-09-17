@@ -891,7 +891,7 @@ S::isError(S::call('set_fonts', ['config' => ['googleFontsURL' => 'http://fonts.
 S::isError(S::call('set_fonts', ['config' => ['fontDisplay' => 'sometimes'], 'dry_run' => true]), 'an unknown fontDisplay is rejected', 'fontDisplay');
 S::isError(S::call('set_fonts', ['config' => ['customFontFaceCSS' => '</style><script>alert(1)</script>'], 'dry_run' => true]), 'customFontFaceCSS with markup is rejected', 'customFontFaceCSS');
 S::isError(S::call('set_fonts', ['config' => ['bogusKey' => 1], 'dry_run' => true]), 'an unknown config key is rejected', 'bogusKey');
-S::isError(S::call('set_fonts', ['dry_run' => true]), 'a call with nothing to change is rejected', 'Pass "fonts", "config", or both');
+S::isError(S::call('set_fonts', ['dry_run' => true]), 'a call with nothing to change is rejected', 'Pass "fonts", "config", "remove"');
 
 $fontsBefore = S::rawOption($fontsOption);
 $configBefore = S::rawOption($configOption);
@@ -1553,6 +1553,134 @@ if (isset($keptPage['post_id'])) {
     S::track('page', (int) $keptPage['post_id'], "PE TEST Kept markers {$run}");
     $storedGrid = S::layout((int) $keptPage['post_id'])[0]['_modules'][0] ?? [];
     S::check(($storedGrid['_bp_base'] ?? null) === '3_4' && ($storedGrid['_m'] ?? null) === ['e' => 1], 'existing markers are kept', (string) wp_json_encode($storedGrid));
+}
+
+// 23. Palette and font removal ---------------------------------------------------
+
+S::section('23 palette and font removal');
+
+S::isError(S::call('set_colors', ['dry_run' => true]), 'set_colors needs colors or remove', '"colors" or "remove"');
+S::isError(S::call('set_colors', ['remove' => ['peTestNoSuchColor'], 'dry_run' => true]), 'removing an unknown color is rejected', 'not in the list');
+S::isError(S::call('set_fonts', ['remove' => ['peTestNoSuchFont'], 'dry_run' => true]), 'removing an unknown font is rejected', 'not in the list');
+
+$colorsBefore = S::rawOption($colorsOption);
+$fontsBefore = S::rawOption($fontsOption);
+
+if (! $isEmptyList($colorsBefore) && ! $localSite) {
+    S::skip('color removal', 'the palette is not empty, so no test colors were written');
+} else {
+    $removeBackup = null;
+
+    try {
+        $added = S::ok(S::call('set_colors', [
+            'colors' => [
+                ['_id' => 'peTestRemoveA', 'title' => 'PE Test Remove A', 'value' => '#abcdef'],
+                ['_id' => 'peTestRemoveB', 'title' => 'PE Test Remove B', 'value' => '#fedcba'],
+            ],
+            'group'  => ['_id' => 'peTestRemoveGroup', 'title' => 'PE Test Remove Group'],
+        ]), 'add two test colors in a group');
+        $removeBackup = is_string($added['backup_id'] ?? null) ? $added['backup_id'] : null;
+
+        $usingTitle = "PE TEST Uses a color {$run}";
+        $using = S::ok(S::call('create_page', ['title' => $usingTitle, 'layout_data' => $pageLayout([
+            ['_type' => 'text', 'text_color' => 'global-color:peTestRemoveA:0.5', 'text_content' => 'PE TEST {{dc:global:color id="peTestRemoveA"}}'],
+        ])]), 'create a page that uses peTestRemoveA');
+        $usingId = (int) ($using['post_id'] ?? 0);
+
+        if ($usingId > 0) {
+            S::track('page', $usingId, $usingTitle);
+        }
+
+        $dry = S::ok(S::call('set_colors', ['remove' => ['peTestRemoveA'], 'dry_run' => true]), 'dry run of removing a color in use');
+        $useA = (array) ($dry['uses']['peTestRemoveA'] ?? []);
+        $pageUse = array_values(array_filter((array) ($useA['locations'] ?? []), static fn($l): bool => ($l['post_id'] ?? 0) === $usingId));
+        S::check(($dry['removed'] ?? null) === ['peTestRemoveA'] && ($dry['blocked'] ?? null) === true, 'the dry run reports the removal as blocked', (string) wp_json_encode($dry));
+        S::check(($pageUse[0]['count'] ?? 0) === 2 && ($pageUse[0]['field'] ?? null) === '_cornerstone_data', 'the page is listed with both references', (string) wp_json_encode($useA));
+        S::check(S::rawOption($colorsOption) === S::rawOption($colorsOption) && in_array('peTestRemoveA', array_column(S::jsonOption($colorsOption) ?? [], '_id'), true), 'the dry run wrote nothing');
+
+        S::isError(S::call('set_colors', ['remove' => ['peTestRemoveA']]), 'removing a color in use is refused', 'force: true');
+        S::check(in_array('peTestRemoveA', array_column(S::jsonOption($colorsOption) ?? [], '_id'), true), 'the refused removal wrote nothing');
+        S::isError(S::call('set_colors', ['colors' => [['_id' => 'peTestRemoveA', 'value' => '#000000']], 'remove' => ['peTestRemoveA'], 'dry_run' => true]), 'a color cannot be updated and removed at once', 'both updated and removed');
+
+        $unused = S::ok(S::call('set_colors', ['remove' => ['peTestRemoveB']]), 'remove the unused color');
+        $items = S::jsonOption($colorsOption) ?? [];
+        $groups = array_values(array_filter($items, static fn($i): bool => is_array($i) && ($i['_id'] ?? null) === 'peTestRemoveGroup'));
+        S::check(($unused['removed'] ?? null) === ['peTestRemoveB'] && is_string($unused['backup_id'] ?? null) && ! in_array('peTestRemoveB', array_column($items, '_id'), true), 'the unused color is removed with a backup', (string) wp_json_encode($unused));
+        S::check(($groups[0]['children'] ?? null) === ['peTestRemoveA'], 'the group no longer lists it', (string) wp_json_encode($groups));
+
+        $forced = S::ok(S::call('set_colors', ['remove' => ['peTestRemoveA', 'peTestRemoveGroup'], 'force' => true]), 'force the removal of the color in use and remove the group');
+        $items = S::jsonOption($colorsOption) ?? [];
+        S::check(($forced['removed'] ?? null) === ['peTestRemoveA'] && ($forced['removed_groups'] ?? null) === ['peTestRemoveGroup'] && ($forced['blocked'] ?? null) === false, 'the forced removal is reported', (string) wp_json_encode($forced));
+        S::check((bool) array_filter((array) ($forced['warnings'] ?? []), static fn($w): bool => str_contains((string) $w, 'transparent')), 'the forced removal warns about the references');
+        S::check(array_intersect(['peTestRemoveA', 'peTestRemoveB', 'peTestRemoveGroup'], array_column($items, '_id')) === [], 'the test entries are gone', (string) wp_json_encode($items));
+    } finally {
+        if ($removeBackup !== null) {
+            $restore = S::call('restore_settings', ['key' => 'colors', 'backup_id' => $removeBackup]);
+            S::check(! $restore['is_error'], 'restore_settings put the palette back', substr($restore['text'], 0, 200));
+        }
+
+        S::check(S::rawOption($colorsOption) === $colorsBefore, 'the palette option is byte-identical to before');
+
+        if (S::rawOption($colorsOption) !== $colorsBefore) {
+            S::attention('The palette option differs from its state before test 23. Check restore_settings for key "colors".');
+        }
+    }
+}
+
+if (! $isEmptyList($fontsBefore) && ! $localSite) {
+    S::skip('font removal', 'the font list is not empty, so no test fonts were written');
+} else {
+    $fontRemoveBackup = null;
+
+    try {
+        $addedFonts = S::ok(S::call('set_fonts', ['fonts' => [
+            ['_id' => 'peTestRemoveSans', 'title' => 'PE Test Remove Sans', 'family' => 'Arial', 'source' => 'system'],
+            ['_id' => 'peTestRemoveSerif', 'title' => 'PE Test Remove Serif', 'family' => 'Georgia', 'source' => 'system'],
+            ['_id' => 'peTestRemoveKeep', 'title' => 'PE Test Remove Keep', 'family' => 'Verdana', 'source' => 'system'],
+        ]]), 'add three test fonts');
+        $fontRemoveBackup = is_string($addedFonts['backup_ids']['fonts'] ?? null) ? $addedFonts['backup_ids']['fonts'] : null;
+
+        $fontPageTitle = "PE TEST Uses a font {$run}";
+        $fontPage = S::ok(S::call('create_page', ['title' => $fontPageTitle, 'layout_data' => $pageLayout([
+            ['_type' => 'headline', 'text_font_family' => 'peTestRemoveSans', 'text_content' => 'PE TEST font'],
+        ])]), 'create a page whose headline uses peTestRemoveSans');
+
+        if (isset($fontPage['post_id'])) {
+            S::track('page', (int) $fontPage['post_id'], $fontPageTitle);
+        }
+
+        $bodyFont = static fn(): string => 'peTestRemoveSerif';
+        add_filter('pre_option_x_body_font_family_selection', $bodyFont);
+        $dryFonts = S::ok(S::call('set_fonts', ['remove' => ['peTestRemoveSans', 'peTestRemoveSerif'], 'dry_run' => true]), 'dry run of removing fonts used by a page and (through a filter) the body font');
+        remove_filter('pre_option_x_body_font_family_selection', $bodyFont);
+
+        $serifUses = array_column((array) ($dryFonts['uses']['peTestRemoveSerif']['locations'] ?? []), 'option');
+        $sansOnPage = array_values(array_filter((array) ($dryFonts['uses']['peTestRemoveSans']['locations'] ?? []), static fn($l): bool => ($l['post_id'] ?? 0) === (int) ($fontPage['post_id'] ?? -1)));
+        S::check(($sansOnPage[0]['count'] ?? 0) === 1 && ($dryFonts['blocked'] ?? null) === true, 'the bare font ID in the headline is found', (string) wp_json_encode($dryFonts['uses'] ?? null));
+        S::check(in_array('x_body_font_family_selection', $serifUses, true), 'the body font theme option is found', (string) wp_json_encode($serifUses));
+
+        S::isError(S::call('set_fonts', ['remove' => ['peTestRemoveSans']]), 'removing a font in use is refused', 'force: true');
+
+        $allFonts = array_values(array_filter(array_column(array_filter(S::jsonOption($fontsOption) ?? [], static fn($i): bool => is_array($i) && ! array_key_exists('children', $i)), '_id')));
+
+        if ($isEmptyList($fontsBefore)) {
+            S::isError(S::call('set_fonts', ['remove' => $allFonts, 'force' => true, 'dry_run' => true]), 'the last font cannot be removed', 'At least one font');
+        }
+
+        $removedFont = S::ok(S::call('set_fonts', ['remove' => ['peTestRemoveSerif']]), 'remove the unused font');
+        S::check(($removedFont['removed'] ?? null) === ['peTestRemoveSerif'] && is_string($removedFont['backup_ids']['fonts'] ?? null), 'the unused font is removed with a backup', (string) wp_json_encode($removedFont));
+    } finally {
+        if ($fontRemoveBackup !== null) {
+            $restore = S::call('restore_settings', ['key' => 'fonts', 'backup_id' => $fontRemoveBackup]);
+            S::check(! $restore['is_error'], 'restore_settings put the font list back', substr($restore['text'], 0, 200));
+        }
+
+        S::check(S::rawOption($fontsOption) === $fontsBefore, 'the font option is byte-identical to before');
+
+        if (S::rawOption($fontsOption) !== $fontsBefore) {
+            S::attention('The font option differs from its state before test 23. Check restore_settings for key "fonts".');
+        }
+    }
 }
 
 // Done -----------------------------------------------------------------------------

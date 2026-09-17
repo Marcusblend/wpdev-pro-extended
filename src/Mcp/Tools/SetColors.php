@@ -6,6 +6,8 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Settings\ItemMerger;
+use ProExtended\Settings\ItemRemover;
+use ProExtended\Settings\ReferenceScanner;
 use ProExtended\Settings\SettingsBackups;
 use ProExtended\Settings\StoredList;
 use ProExtended\Support\Args;
@@ -16,11 +18,12 @@ final class SetColors implements ToolInterface, AnnotatedToolInterface
     public const OPTION = 'cornerstone_color_items';
     public const ID_PATTERN = '/^[A-Za-z][A-Za-z0-9_-]{2,63}$/';
 
-    private const ARGUMENTS = ['colors', 'group', 'allow_locked', 'dry_run'];
+    private const ARGUMENTS = ['colors', 'group', 'allow_locked', 'dry_run', 'remove', 'force'];
 
     public function __construct(
         private readonly DocumentGateway $gateway,
         private readonly SettingsBackups $backups,
+        private readonly ?ReferenceScanner $scanner = null,
     ) {}
 
     public function name(): string
@@ -30,14 +33,13 @@ final class SetColors implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Add or update global palette colors by _id ({_id, title, value}); existing entries keep every key you do not change, and nothing is removed. Reference colors in layouts as "global-color:<_id>". group ({_id, title}) is created if missing and new colors are added to it. Entries stored as locked (for example a starter kit\'s palette) change only with allow_locked: true, which keeps every existing reference working. Run with dry_run: true first.';
+        return 'Add or update global palette colors by _id ({_id, title, value}); existing entries keep every key you do not change. Reference colors in layouts as "global-color:<_id>". group ({_id, title}) is created if missing and new colors are added to it. remove lists color or group IDs to delete: each color is first looked up in documents, element data, templates, theme options and other palette entries, and a color still in use is only removed with force: true (Cornerstone renders missing colors as transparent). Entries stored as locked (for example a starter kit\'s palette) change only with allow_locked: true. Run with dry_run: true first.';
     }
 
     public function inputSchema(): array
     {
         return [
             'type'       => 'object',
-            'required'   => ['colors'],
             'properties' => [
                 'colors' => [
                     'type'        => 'array',
@@ -52,7 +54,18 @@ final class SetColors implements ToolInterface, AnnotatedToolInterface
                             'value' => ['type' => 'string', 'description' => 'Any CSS color: hex, rgb(), rgba(), hsl(), transparent, var(--token).'],
                         ],
                     ],
-                    'description' => 'Colors to add or update. New colors need title and value.',
+                    'description' => 'Colors to add or update. New colors need title and value. Required unless remove is given.',
+                ],
+                'remove' => [
+                    'type'        => 'array',
+                    'minItems'    => 1,
+                    'maxItems'    => 200,
+                    'items'       => ['type' => 'string'],
+                    'description' => 'Optional. Color or group IDs to delete. Removing a group keeps its colors.',
+                ],
+                'force' => [
+                    'type'        => 'boolean',
+                    'description' => 'Optional. Remove colors even when the site still uses them. Default: false.',
                 ],
                 'group' => [
                     'type'        => 'object',
@@ -76,17 +89,20 @@ final class SetColors implements ToolInterface, AnnotatedToolInterface
 
     public function execute(array $arguments): mixed
     {
-        $arguments = JsonArgs::decode($arguments, ['colors', 'group']);
+        $arguments = JsonArgs::decode($arguments, ['colors', 'group', 'remove']);
         Args::rejectUnknown($arguments, self::ARGUMENTS, 'arguments');
 
         $colors = Args::list($arguments, 'colors', 1, 200);
+        $remove = Args::list($arguments, 'remove', 1, 200);
 
-        if ($colors === null) {
-            throw new \InvalidArgumentException('"colors" is required.');
+        if ($colors === null && $remove === null) {
+            throw new \InvalidArgumentException('"colors" or "remove" is required.');
         }
 
+        $colors ??= [];
         $allowLocked = Args::bool($arguments, 'allow_locked', false);
         $dryRun = Args::bool($arguments, 'dry_run', false);
+        $force = Args::bool($arguments, 'force', false);
         $errors = [];
         $items = [];
 
@@ -114,31 +130,64 @@ final class SetColors implements ToolInterface, AnnotatedToolInterface
             }
         }
 
+        $removal = null;
+
+        if ($remove !== null) {
+            $both = array_intersect(array_column($items, '_id'), array_filter($remove, 'is_string'));
+
+            if ($both !== []) {
+                $errors[] = sprintf('%s cannot be both updated and removed.', implode(', ', array_map(static fn(string $id): string => '"' . $id . '"', $both)));
+            }
+
+            $removal = ItemRemover::remove($merge['items'], $remove, $allowLocked);
+            $errors = array_merge($errors, $removal['errors']);
+        }
+
         if ($errors !== []) {
             throw new \InvalidArgumentException(implode(' ', $errors));
         }
 
+        $uses = $removal !== null && $removal['removed'] !== []
+            ? ($this->scanner ?? new ReferenceScanner())->scan(ReferenceScanner::KIND_COLOR, $removal['removed'], $removal['items'])
+            : [];
+        $inUse = array_filter($uses, static fn(array $use): bool => $use['count'] > 0);
+
         $groupChanged = in_array($merge['group']['action'] ?? null, ['created', 'updated'], true);
-        $changed = $merge['added'] !== [] || $merge['updated'] !== [] || $groupChanged;
+        $removed = $removal !== null && ($removal['removed'] !== [] || $removal['removed_groups'] !== []);
+        $changed = $merge['added'] !== [] || $merge['updated'] !== [] || $groupChanged || $removed;
 
         $result = [
-            'changed'    => $changed,
-            'dry_run'    => $dryRun,
-            'added'      => $merge['added'],
-            'updated'    => $merge['updated'],
-            'unchanged'  => $merge['unchanged'],
-            'group'      => $merge['group'],
-            'backup_id'  => null,
-            'write_path' => null,
-            'warnings'   => $changed ? [] : ['Nothing to change; nothing was written.'],
+            'changed'        => $changed,
+            'dry_run'        => $dryRun,
+            'added'          => $merge['added'],
+            'updated'        => $merge['updated'],
+            'unchanged'      => $merge['unchanged'],
+            'group'          => $merge['group'],
+            'removed'        => $removal['removed'] ?? [],
+            'removed_groups' => $removal['removed_groups'] ?? [],
+            'uses'           => $uses === [] ? (object) [] : $uses,
+            'blocked'        => $inUse !== [] && ! $force,
+            'backup_id'      => null,
+            'write_path'     => null,
+            'warnings'       => $changed ? [] : ['Nothing to change; nothing was written.'],
         ];
+
+        if ($inUse !== []) {
+            $result['warnings'][] = ($force ? 'Removed although still in use (those references now render as transparent): ' : 'Still in use, so nothing will be removed without force: true: ')
+                . ReferenceScanner::describe($inUse) . '.';
+        }
 
         if ($dryRun || ! $changed) {
             return $result;
         }
 
+        if ($result['blocked']) {
+            throw new \RuntimeException('Nothing was written. ' . ReferenceScanner::describe($inUse) . '. Replace those references first, or pass force: true to remove the colors anyway (Cornerstone renders missing colors as transparent).');
+        }
+
+        $finalItems = $removal !== null ? $removal['items'] : $merge['items'];
         $backup = $this->backups->backup('colors', 'set_colors');
-        update_option(self::OPTION, StoredList::encode(array_values($merge['items'])));
+        update_option(self::OPTION, StoredList::encode(array_values($finalItems)));
         $purge = $this->gateway->purgeGenerated();
 
         $result['backup_id'] = $backup['backup_id'];
