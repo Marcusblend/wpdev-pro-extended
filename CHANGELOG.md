@@ -7,6 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-17
+
+"Site Foundations": the MCP server can now create the rest of a site's foundation — headers, footers, component documents and layouts, the global palette and fonts, Global CSS and media — with dry runs, automatic backups and the same cache clearing Cornerstone's builder does. Existing tools keep their names, input properties and success result shapes (new optional properties and additional result keys only).
+
+### Added
+
+- **11 new MCP tools (25 in total)**:
+  - `create_document` — create a header, footer, component document, or single/archive layout, with optional settings and layout data; `if_not_exists` (default true) makes retries safe, and a warning names any other document already assigned to `site:entire-site` at the same priority
+  - `update_document_settings` — change a document's settings, title or (components) slug without touching its elements (they are saved exactly as stored, without Cornerstone's load-time element migrations); reports before/after per key, and `restore_layout` puts the title and slug back
+  - `list_components` — the component registry the builder uses (component ID, label, source document, library group, prefab, children/slots, parameter groups), plus duplicate `_c_id` errors
+  - `get_global_css` / `set_global_css` — Global CSS through named `pe:begin`/`pe:end` blocks; CSS outside the blocks is never changed; unsafe or unbalanced CSS is refused and risky CSS is flagged (background without color, remote `@import`, heavy `!important`)
+  - `set_colors` / `set_fonts` — add or update palette colors and global fonts by `_id`, keeping every key not changed (including `locked`); `allow_locked` updates a starter kit's locked slots without breaking references; `set_fonts` derives `name`, `stack` and weights the way Cornerstone does and merges font settings
+  - `upload_media` — images and web fonts from HTTPS URLs (size-capped, private addresses refused) or small base64 payloads, with alt text enforcement, hash-based dedupe, an opt-in SVG allowlist that refuses (never strips) unsafe content, and a per-call time budget
+  - `list_menus` — menus with locations and `menu:<id>` references
+  - `list_settings_backups` / `restore_settings` — the last 10 backups of colors, fonts, font config and Global CSS, each stored in its own non-autoloaded option with its existence and autoload state
+- **Cornerstone adapter** (`ProExtended\Cornerstone\DocumentGateway`): the single, guarded entry point into Cornerstone internals, with a direct-write fallback and a `pe_force_fallback` filter for testing. Write responses report `write_path` (`cornerstone-api` or `fallback`)
+- **`dry_run`** on every new write tool, and `warnings` on every new tool response
+- **`get_layout`**: `summary` (an outline with paths, types, labels and child counts, plus the document's size and element count) and `path` (one subtree, or an element and its descendants in component documents), for documents too large to return whole
+- **`create_page`**: `parent_id`, `menu_order`, `template` (validated against the theme's page templates) and `excerpt`, plus `if_not_exists` (an existing page with the same slug and parent is returned; a draft without a slug matches on its title)
+- **`list_layouts`**: `doc_type` on every row; component documents also report `format` (component or legacy), `library_group`, `document_visibility` and `component_count`
+- **`clear_cache`**: `include` (`tss`, `generated_styles`, `components`, `assignments`, `host`), and a report of what ran and what was unavailable
+- **`get_site_info`**: a `health` block (permalinks, application passwords, `blog_public`, breakpoints, capabilities, Global CSS key, adapter entry points, component registry errors, host cache purging, Pro Extended settings, environment type, tool registration errors)
+- **`wp pe doctor`**: the health checks as pass/warn/fail lines; exits non-zero only when a check fails; `--format=json` prints only the JSON report
+- **Validator**: warnings for component instances whose `component_id` is not in the registry, or that set top-level `_p_data` keys the component does not declare
+- **`pe_allow_skip_validation`** option and filter (default `'1'`): `'0'` refuses `skip_validation: true`
+- **MCP annotations** (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`) on every tool through the optional `AnnotatedToolInterface`, a top-level `title` in `tools/list`, and short usage `instructions` in the `initialize` result
+- **`pe_mcp_register_tools`** action for registering additional tools
+- **Tests**: plain-PHP unit tests (`php tests/unit/run.php`) and WP-CLI smoke suites (`tests/smoke/`) that exercise every tool on both write paths
+- **`.gitattributes`** so release archives leave out tests and tooling
+
+### Changed
+
+- **Tool failures are MCP results with `isError: true`**, not JSON-RPC errors, so the model sees the reason. JSON-RPC errors remain for an unknown tool, a missing tool name and a failed `requiredCapability()` check. `wp pe mcp call` prints such results and exits with status 1
+- **Header, footer, layout and component writes go through Cornerstone's Document API**, firing `cs_save_document`, `cs_save_{type}` and `cs_purge_tmp` as the builder does. `deploy_layout` on these documents is a full replace of the shape `get_layout` returns: settings the payload leaves out return to their defaults, while the title, slug, custom scripts/styles and a single/archive layout's `layout_type` (which decides its post type) are kept. Payloads in any other shape are refused instead of being stored. Legacy global blocks and legacy `cs_layout` posts keep the direct write
+- **Page writes keep their write path** and then fire `cs_save_document`, which refreshes the last-save timestamps and the Google Fonts request cache like a builder save (`_cs_last_save` now uses Cornerstone's timestamp format)
+- **Writes that could be damaged or abused without `unfiltered_html` are refused**: Cornerstone document writes (WordPress filters post_content for such users, breaking the JSON), `customCSS`/`customJS`, and Raw Content elements. `wp pe layout import` and write tools in `wp pe mcp call` therefore need `--user`
+- **Each tool registers on its own**: a tool that fails to load is logged and skipped, and `tools/list` and every other tool keep working
+- **README**: Claude Desktop setup through `mcp-remote`, a Prerequisites section, the new tools, reference formats, options and commands
+
+### Fixed
+
+- **Stale component registry and assignment rules**: `deploy_layout`, `update_layout` and `restore_layout` wrote `cs_*` documents directly and only deleted `_cs_generated_tss`, so a deployed component document did not reach the registry and header/footer/layout assignment changes stayed cached until something else purged them. Writes and restores now run Cornerstone's save hooks (or clear the same caches directly on the fallback path)
+- **`create_page` stored unvalidated layouts and left pages behind**: `layout_data` is now validated before the page is inserted, and a page whose layout fails to save is removed again. `wp pe layout import` validates too
+- **Some layout post types were read and written as page meta**: `cs_layout`, `cs_layout_single_wc` and `cs_layout_archive_wc` are now always detected as `post_content` documents
+- **Object and array arguments sent as JSON strings** were refused by `deploy_layout` (and silently dropped by `create_page`). A shared decoder now normalizes them before validation in every tool that takes objects or arrays; a string that is not a JSON object or array is an error. Thanks to [#1](https://github.com/renandadalte/wpdev-pro-extended/pull/1) for identifying the problem and the Claude Desktop configuration fix
+- **`get_layout` overflowed client result limits** on large component documents (see `summary` and `path`)
+- **A site-wide `clear_cache` cleared too little**: it now also purges generated styles and Cornerstone's temporary caches by default, and uses the metadata API so persistent object caches are cleared too
+- **`list_fonts` reported an empty font config**: Cornerstone stores it slashed and the options API does not unslash; both forms are now decoded
+- **Stale generated styles with a persistent object cache**: Cornerstone deletes generated-style and component-map meta with `$wpdb`; Pro Extended now clears the post meta cache of every affected post after a purge
+
 ## [1.0.4] - 2026-09-15
 
 ### Fixed
