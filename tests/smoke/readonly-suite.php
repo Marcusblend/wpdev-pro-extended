@@ -135,7 +135,11 @@ if ($componentDocId <= 0) {
     $shallow = S::call('get_layout', ['post_id' => $componentDocId, 'summary' => true, 'max_depth' => 2]);
     S::check(! $shallow['is_error'] && $shallow['bytes'] <= $summary['bytes'], 'a smaller max_depth returns a smaller outline', $shallow['bytes'] . ' bytes');
 
-    $outline = (array) ($summary['data']['outline'] ?? []);
+    // Find a leaf element and a component root anywhere in the document (a
+    // full-depth outline can be large; it is only used to pick paths).
+    $deep = S::call('get_layout', ['post_id' => $componentDocId, 'summary' => true, 'max_depth' => 50]);
+    $outline = (array) ($deep['data']['outline'] ?? []);
+    S::check(! $deep['is_error'] && ($deep['data']['truncated'] ?? null) === false, 'a full-depth outline covers the whole document', $deep['bytes'] . ' bytes');
     $leaf = null;
 
     foreach (array_reverse($outline) as $node) {
@@ -145,7 +149,9 @@ if ($componentDocId <= 0) {
         }
     }
 
-    if ($leaf !== null) {
+    if ($leaf === null) {
+        S::check(false, 'the outline has a leaf element to fetch by path');
+    } else {
         $subtree = S::call('get_layout', ['post_id' => $componentDocId, 'path' => $leaf]);
         S::check(! $subtree['is_error'] && $subtree['bytes'] < 20000, "get_layout with path {$leaf} is under 20 KB", $subtree['bytes'] . ' bytes');
         S::check(($subtree['data']['data']['root'] ?? null) === $leaf, 'the path returns that element');
@@ -160,9 +166,13 @@ if ($componentDocId <= 0) {
         }
     }
 
-    if ($exported !== null) {
+    if ($exported === null) {
+        S::skip('component root outline', 'the document exports no components');
+    } else {
         $component = S::call('get_layout', ['post_id' => $componentDocId, 'path' => $exported, 'summary' => true]);
         S::check(! $component['is_error'] && $component['bytes'] < 20000, "an outline of component root {$exported} is under 20 KB", $component['bytes'] . ' bytes');
+        S::check(($component['data']['outline'][0]['path'] ?? null) === $exported, 'the outline starts at that component root');
+        echo "      component root {$exported}: outline {$component['bytes']} bytes, " . count((array) ($component['data']['outline'] ?? [])) . " nodes\n";
     }
 
     S::isError(S::call('get_layout', ['post_id' => $componentDocId, 'path' => 'no.such.path']), 'an unknown path is an error', 'not found');
