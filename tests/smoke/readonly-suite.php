@@ -270,6 +270,61 @@ if ($componentDocId > 0) {
 $validation = S::ok(S::call('validate_layout', ['layout_data' => '[{"_type": "section", "_modules": []}]']), 'validate_layout with a JSON string');
 S::check(($validation['valid'] ?? null) === true, 'the JSON string is decoded and validated');
 
+// 21. Site feature report -------------------------------------------------------------
+
+S::section('21 site feature report');
+
+$features = (array) ($info['features'] ?? []);
+
+foreach (['content_storage', 'twig', 'external_api', 'csv', 'wpml', 'woocommerce', 'acf', 'max', 'permissions'] as $key) {
+    S::check(array_key_exists($key, $features), "features has {$key}");
+}
+
+S::check(! array_key_exists('features', $health), 'features are not repeated in the health block');
+S::check(($features['content_storage']['mode'] ?? null) === (get_option('cs_document_build_as_html', true) ? 'html' : 'shortcodes'), 'content_storage matches the site option', (string) wp_json_encode($features['content_storage'] ?? null));
+S::check(is_bool($features['twig']['enabled'] ?? null) && is_bool($features['external_api']['enabled'] ?? null) && is_bool($features['csv']['enabled'] ?? null), 'the switches are booleans');
+S::check(($features['woocommerce']['active'] ?? null) === class_exists('WooCommerce') && ($features['wpml']['active'] ?? null) === class_exists('SitePress') && ($features['acf']['active'] ?? null) === class_exists('ACF'), 'the integrations match the loaded plugins');
+S::check(($features['permissions']['available'] ?? null) === true && in_array('content.page', (array) ($features['permissions']['allowed'] ?? []), true), 'the caller\'s Cornerstone permissions are reported', (string) wp_json_encode($features['permissions'] ?? null));
+S::check(preg_match('/^\d+_\d+$/', (string) ($info['breakpoints']['tag'] ?? '')) === 1, 'breakpoints report their tag', (string) ($info['breakpoints']['tag'] ?? ''));
+
+$maxJson = (string) wp_json_encode($features['max'] ?? null);
+S::check(is_int($features['max']['count'] ?? null) && ! str_contains($maxJson, '://') && ! str_contains($maxJson, '"package"') && ! str_contains($maxJson, '"edge"'), 'the Max summary has no package URLs', 'count ' . ($features['max']['count'] ?? 'null'));
+echo '      features: ' . wp_json_encode(['content_storage' => $features['content_storage'] ?? null, 'twig' => $features['twig']['enabled'] ?? null, 'external_api' => array_intersect_key((array) ($features['external_api'] ?? []), array_flip(['enabled', 'allowlist_empty', 'allowlist_entries', 'global_endpoints'])), 'max_active' => array_column(array_filter((array) ($features['max']['packages'] ?? []), static fn($p): bool => ! empty($p['active'])), 'slug')]) . "\n";
+
+// Secrets never leave the site: filters stand in for the stored options, so
+// nothing is written.
+$fakeSecret = 'PE-TEST-SECRET-' . wp_generate_password(12, false);
+$fakeFilters = [
+    'pre_option_x_max_plugins'               => static fn(): array => [[
+        'slug'        => 'pe-test-max',
+        'plugin'      => 'pe-test-max/pe-test-max.php',
+        'title'       => 'PE TEST Max',
+        'new_version' => '9.9.9',
+        'package'     => 'https://packages.example.invalid/pe-test.zip?key=' . $fakeSecret,
+        'edge'        => ['package' => 'https://packages.example.invalid/edge.zip?key=' . $fakeSecret, 'new_version' => '10.0'],
+        'purchased'   => true,
+        'x-extension' => ['logo_url' => 'https://cdn.example.invalid/' . $fakeSecret . '.png'],
+    ]],
+    'pre_option_cs_api_extension_allowlist'  => static fn(): string => "https://api.example.invalid/{$fakeSecret}/\nhttps://other.example.invalid \r",
+    'pre_option_cs_api_endpoints'            => static fn(): array => [['id' => 'pe-test', 'name' => 'PE TEST', 'endpoint' => 'https://api.example.invalid/', 'headers' => 'Authorization: Bearer ' . $fakeSecret]],
+];
+
+foreach ($fakeFilters as $hook => $callback) {
+    add_filter($hook, $callback);
+}
+
+$fakeInfo = S::call('get_site_info');
+
+foreach ($fakeFilters as $hook => $callback) {
+    remove_filter($hook, $callback);
+}
+
+$fakeData = is_array($fakeInfo['data']) ? $fakeInfo['data'] : [];
+S::check(! $fakeInfo['is_error'] && ! str_contains($fakeInfo['text'], $fakeSecret) && ! str_contains($fakeInfo['text'], 'example.invalid'), 'no package URL, allowlist entry or endpoint header appears in get_site_info');
+$fakePackage = $fakeData['features']['max']['packages'][0] ?? [];
+S::check(($fakePackage['slug'] ?? null) === 'pe-test-max' && ($fakePackage['version'] ?? null) === '9.9.9' && ($fakePackage['installed'] ?? null) === false, 'a Max package is summarized', (string) wp_json_encode($fakePackage));
+S::check(($fakeData['features']['external_api']['allowlist_entries'] ?? null) === 2 && ($fakeData['features']['external_api']['entries_with_extra_spaces'] ?? null) === 1 && ($fakeData['features']['external_api']['entries_without_final_slash'] ?? null) === 1 && ($fakeData['features']['external_api']['global_endpoints'] ?? null) === 1, 'the allowlist is described, not listed', (string) wp_json_encode($fakeData['features']['external_api'] ?? null));
+
 // 20. Validator warning codes --------------------------------------------------------
 
 S::section('20 validator warning codes');

@@ -71,6 +71,7 @@ final class Health
             ],
             'environment_type'             => wp_get_environment_type(),
             'tool_registration_errors'     => $this->server !== null ? (object) $this->server->getRegistrationErrors() : (object) [],
+            'features'                     => Features::report(),
         ];
     }
 
@@ -140,6 +141,10 @@ final class Health
         $r['host_cache']['purge_available']
             ? $add('pass', 'Host cache', ($r['host_cache']['host'] ?? 'host') . ': ' . implode(', ', $r['host_cache']['methods']))
             : $add('warn', 'Host cache', 'WP Engine cache purging is not available');
+
+        foreach (Features::checks((array) ($r['features'] ?? [])) as $line) {
+            $lines[] = $line;
+        }
 
         $add('info', 'Environment', (string) $r['environment_type']);
         $add('info', 'Global CSS option', (string) $r['global_css_key']);

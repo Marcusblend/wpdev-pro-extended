@@ -19,7 +19,7 @@ final class GetSiteInfo implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Get WordPress site information including versions, theme details, breakpoint configuration, and active plugins, plus a health block (permalinks, application passwords, capabilities, Cornerstone adapter, component registry, cache purging, settings).';
+        return 'Get WordPress site information including versions, theme details, breakpoint configuration, and active plugins, plus a features block (content storage mode, Twig, External API and whether its allowlist is empty, CSV, WPML, WooCommerce, ACF, Max products and your Cornerstone permissions) and a health block (permalinks, application passwords, capabilities, Cornerstone adapter, component registry, cache purging, settings).';
     }
 
     public function inputSchema(): array
@@ -75,12 +75,16 @@ final class GetSiteInfo implements ToolInterface, AnnotatedToolInterface
                 'base'   => $bpBase,
                 'ranges' => $bpRanges,
                 'total'  => $bpBase + 1,
+                'tag'    => $bpBase . '_' . (is_array($bpRanges) && $bpRanges !== [] ? count($bpRanges) : 4),
             ],
             'active_plugins'  => $pluginNames,
         ];
 
         if ($this->health !== null) {
-            $info['health'] = $this->health->report();
+            $health = $this->health->report();
+            $info['features'] = $health['features'] ?? null;
+            unset($health['features']);
+            $info['health'] = $health;
         }
 
         return $info;
