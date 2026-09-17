@@ -270,6 +270,59 @@ if ($componentDocId > 0) {
 $validation = S::ok(S::call('validate_layout', ['layout_data' => '[{"_type": "section", "_modules": []}]']), 'validate_layout with a JSON string');
 S::check(($validation['valid'] ?? null) === true, 'the JSON string is decoded and validated');
 
+// 20. Validator warning codes --------------------------------------------------------
+
+S::section('20 validator warning codes');
+
+$lintFixture = [[
+    '_type'          => 'section',
+    'show_condition' => [['condition' => 'global:pe-test-no-such-rule', 'value' => '']],
+    '_modules'       => [[
+        '_type'                        => 'layout-grid',
+        'layout_grid_template_columns' => '1fr 1fr',
+        '_modules'                     => [[
+            '_type'                => 'layout-cell',
+            'looper_provider'      => true,
+            'looper_provider_type' => 'pe-test-no-such-provider',
+            'custom_atts'          => '{not json',
+            '_modules'             => [['_type' => 'text', 'text_content' => '{{dc:post:title']],
+        ]],
+    ]],
+]];
+$lintResult = S::ok(S::call('validate_layout', ['layout_data' => $lintFixture]), 'validate a layout with known problems');
+$codes = array_keys((array) ($lintResult['codes'] ?? []));
+S::check(($lintResult['valid'] ?? null) === true, 'warnings do not make the layout invalid');
+
+foreach (['missing-migration-marker', 'missing-breakpoint-base', 'condition-unknown', 'looper-shape', 'custom-atts-type', 'token-syntax'] as $code) {
+    S::check(in_array($code, $codes, true), "reports {$code}", implode(', ', $codes));
+}
+
+$issuePaths = [];
+
+foreach ((array) ($lintResult['issues'] ?? []) as $issue) {
+    $issuePaths[$issue['code']][] = $issue['path'];
+}
+
+S::check(in_array('0._modules.0._modules.0._modules.0', $issuePaths['token-syntax'] ?? [], true), 'issues carry update_layout paths', (string) wp_json_encode($issuePaths));
+S::check(($lintResult['issue_count'] ?? 0) >= count((array) ($lintResult['issues'] ?? [])) && ($lintResult['issue_count'] ?? 0) > 0, 'issue_count is reported');
+S::check((bool) array_filter((array) ($lintResult['warnings'] ?? []), static fn($w): bool => str_starts_with((string) $w, '[missing-breakpoint-base]')), 'warnings are summarized with their codes', (string) wp_json_encode($lintResult['warnings'] ?? null));
+
+$known = S::ok(S::call('validate_layout', ['layout_data' => [[
+    '_type'          => 'text',
+    '_m'             => ['e' => 1],
+    '_bp_base'       => pro_extended()->elementContext()->breakpointTag(),
+    'show_condition' => [['group' => true, 'condition' => 'global:user-loggedin', 'value' => '', 'toggle' => true]],
+    'text_content'   => "{{dc:post:title fallback='PE TEST'}}",
+]]]), 'validate a well-formed element');
+S::same([], (array) ($known['codes'] ?? ['missing' => 1]), 'a well-formed element has no warning codes');
+
+if ($componentDocId > 0) {
+    $stored = S::layout($componentDocId);
+    $storedResult = S::ok(S::call('validate_layout', ['layout_data' => $stored, 'context' => 'flat']), "validate component document #{$componentDocId}");
+    S::check(($storedResult['valid'] ?? null) === true && is_array($storedResult['issues'] ?? null), 'the stored document validates and lists its issues');
+    echo '      codes: ' . wp_json_encode($storedResult['codes'] ?? null) . "\n";
+}
+
 // Nothing changed ------------------------------------------------------------------------
 
 S::section('nothing was written');

@@ -379,8 +379,8 @@ TXT;
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
         $sharedValidator = null;
-        $validator = static function () use (&$sharedValidator, $schema, $gateway): HierarchyValidator {
-            return $sharedValidator ??= new HierarchyValidator($schema, $gateway);
+        $validator = static function () use (&$sharedValidator, $schema, $gateway, $elements): HierarchyValidator {
+            return $sharedValidator ??= new HierarchyValidator($schema, $gateway, $elements);
         };
 
         $factories = [

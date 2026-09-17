@@ -111,11 +111,19 @@ final class Plugin
         return $this->resolve('elements.schema', fn() => new Elements\SchemaExtractor());
     }
 
+    public function elementContext(): Cornerstone\ElementContext
+    {
+        return $this->resolve('elements.context', fn() => new Cornerstone\ElementContext(
+            $this->schemaExtractor(),
+        ));
+    }
+
     public function hierarchyValidator(): Elements\HierarchyValidator
     {
         return $this->resolve('elements.hierarchy', fn() => new Elements\HierarchyValidator(
             $this->schemaExtractor(),
             $this->documentGateway(),
+            $this->elementContext(),
         ));
     }
 

@@ -6,6 +6,7 @@ namespace ProExtended\Elements;
 
 use ProExtended\Cornerstone\ComponentScanner;
 use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Cornerstone\ElementContext;
 
 /**
  * Validates Cornerstone layout data against element hierarchy rules and data format requirements.
@@ -15,14 +16,21 @@ final class HierarchyValidator
     /** @var array<string, string[]> Cached hierarchy map. */
     private ?array $hierarchyMap = null;
 
+    /** @var array<int, array{code: string, path: string, type: string, message: string}> Issues of the current validate() call. */
+    private array $issues = [];
+
     /**
      * @param DocumentGateway|null $components Source of the component registry;
      *                                         without it component instances
      *                                         are not checked.
+     * @param ElementContext|null  $elements   Site context for the element
+     *                                         data checks (ElementLint);
+     *                                         without it they do not run.
      */
     public function __construct(
         private readonly SchemaExtractor $schema,
         private readonly ?DocumentGateway $components = null,
+        private readonly ?ElementContext $elements = null,
     ) {}
 
     /**
@@ -36,20 +44,26 @@ final class HierarchyValidator
     {
         $errors = [];
         $warnings = [];
+        $this->issues = [];
 
         if (! is_array($data)) {
             return new ValidationResult(false, ['Layout data must be an array.'], []);
         }
 
+        $lint = $this->lint();
+
         if ($context === 'flat') {
             // Global blocks are a flat map, sometimes nested under `elements`.
-            $elements = (isset($data['elements']) && is_array($data['elements']))
-                ? $data['elements']
-                : $data;
+            $wrapped = isset($data['elements']) && is_array($data['elements']);
+            $elements = $wrapped ? $data['elements'] : $data;
 
-            $this->validateFlatMap($elements, $errors, $warnings);
+            $this->validateFlatMap($elements, $errors, $warnings, $wrapped ? 'elements' : '');
 
-            return new ValidationResult(empty($errors), $errors, $warnings);
+            if ($lint !== null) {
+                $this->addLintIssues($lint->flat($elements, $wrapped ? 'elements' : ''), $warnings);
+            }
+
+            return new ValidationResult(empty($errors), $errors, $warnings, $this->issues);
         }
 
         // Pages store a bare element list, but headers, footers and layout
@@ -67,16 +81,23 @@ final class HierarchyValidator
             // remains the deliberate escape hatch.
             $warnings[] = 'Layout envelope not recognised; validated as a flat element map.';
 
-            $this->validateFlatMap($data, $errors, $warnings);
+            $this->validateFlatMap($data, $errors, $warnings, '');
 
-            return new ValidationResult(empty($errors), $errors, $warnings);
+            if ($lint !== null) {
+                $this->addLintIssues($lint->flat($data, ''), $warnings);
+            }
+
+            return new ValidationResult(empty($errors), $errors, $warnings, $this->issues);
         }
+
+        $lintIssues = [];
 
         foreach ($regions as $name => $tree) {
             $regionErrors = [];
             $regionWarnings = [];
+            $base = $name === '' ? '' : 'regions.' . $name;
 
-            $this->validateTree($tree, $regionErrors, $regionWarnings, null);
+            $this->validateTree($tree, $regionErrors, $regionWarnings, null, $base);
 
             $prefix = $name === '' ? '' : sprintf('Region "%s": ', $name);
 
@@ -87,9 +108,56 @@ final class HierarchyValidator
             foreach ($regionWarnings as $warning) {
                 $warnings[] = $prefix . $warning;
             }
+
+            if ($lint !== null) {
+                $lintIssues = array_merge($lintIssues, $lint->tree($tree, $base));
+            }
         }
 
-        return new ValidationResult(empty($errors), $errors, $warnings);
+        $this->addLintIssues($lintIssues, $warnings);
+
+        return new ValidationResult(empty($errors), $errors, $warnings, $this->issues);
+    }
+
+    /**
+     * The element data checks, when the site context is available.
+     */
+    private function lint(): ?ElementLint
+    {
+        if ($this->elements === null) {
+            return null;
+        }
+
+        try {
+            return new ElementLint($this->elements->lintContext());
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    /**
+     * @param array<int, array{code: string, path: string, type: string, message: string}> $issues
+     * @param string[]                                                                      $warnings
+     */
+    private function addLintIssues(array $issues, array &$warnings): void
+    {
+        foreach ($issues as $issue) {
+            $this->issues[] = $issue;
+        }
+
+        foreach (ElementLint::summarize($issues) as $line) {
+            $warnings[] = $line;
+        }
+    }
+
+    /**
+     * Record a structural warning with its code, and return its message.
+     */
+    private function issue(string $code, string $path, string $type, string $message): string
+    {
+        $this->issues[] = ['code' => $code, 'path' => $path, 'type' => $type, 'message' => $message];
+
+        return $message;
     }
 
     /**
@@ -146,9 +214,11 @@ final class HierarchyValidator
      * @param string[]          $warnings
      * @param string|null       $parentType
      */
-    private function validateTree(array $elements, array &$errors, array &$warnings, ?string $parentType): void
+    private function validateTree(array $elements, array &$errors, array &$warnings, ?string $parentType, string $base = ''): void
     {
         foreach ($elements as $index => $element) {
+            $path = ($base === '' ? '' : $base . '.') . $index;
+
             if (! is_array($element)) {
                 $errors[] = sprintf('Element at index %d is not an array.', $index);
                 continue;
@@ -161,19 +231,21 @@ final class HierarchyValidator
                 continue;
             }
 
+            $type = (string) $type;
+
             // Check if element type exists in the registry.
             $def = $this->schema->getDefinition($type);
             if ($def === null) {
-                $warnings[] = sprintf('Unknown element type "%s" at index %d (may be custom or deprecated).', $type, $index);
+                $warnings[] = $this->issue('unknown-element', $path, $type, sprintf('Unknown element type "%s" at index %d (may be custom or deprecated).', $type, $index));
             }
 
             // Check parent-child relationship.
             if ($parentType !== null) {
-                $this->validateParentChild($parentType, $type, $warnings);
+                $this->validateParentChild($parentType, $type, $warnings, $path);
             }
 
             if ($type === 'component') {
-                $this->checkComponentInstance($element, sprintf('Element at index %d', $index), $warnings);
+                $this->checkComponentInstance($element, sprintf('Element at index %d', $index), $warnings, $path);
             }
 
             // Validate _bp_data format.
@@ -181,7 +253,7 @@ final class HierarchyValidator
 
             // Recurse into children.
             if (isset($element['_modules']) && is_array($element['_modules'])) {
-                $this->validateTree($element['_modules'], $errors, $warnings, $type);
+                $this->validateTree($element['_modules'], $errors, $warnings, $type, $path . '._modules');
             }
         }
     }
@@ -193,9 +265,11 @@ final class HierarchyValidator
      * @param string[]             $errors
      * @param string[]             $warnings
      */
-    private function validateFlatMap(array $elements, array &$errors, array &$warnings): void
+    private function validateFlatMap(array $elements, array &$errors, array &$warnings, string $base = ''): void
     {
         foreach ($elements as $id => $element) {
+            $path = ($base === '' ? '' : $base . '.') . $id;
+
             if (! is_array($element)) {
                 $errors[] = sprintf('Element "%s" is not an array.', $id);
                 continue;
@@ -208,14 +282,16 @@ final class HierarchyValidator
                 continue;
             }
 
+            $type = (string) $type;
+
             // Check element type.
             $def = $this->schema->getDefinition($type);
             if ($def === null) {
-                $warnings[] = sprintf('Unknown element type "%s" for element "%s".', $type, $id);
+                $warnings[] = $this->issue('unknown-element', $path, $type, sprintf('Unknown element type "%s" for element "%s".', $type, $id));
             }
 
             if ($type === 'component') {
-                $this->checkComponentInstance($element, sprintf('Element "%s"', $id), $warnings);
+                $this->checkComponentInstance($element, sprintf('Element "%s"', $id), $warnings, $path);
             }
 
             // Check _id consistency.
@@ -247,7 +323,7 @@ final class HierarchyValidator
      *
      * @param string[] $warnings
      */
-    private function validateParentChild(string $parentType, string $childType, array &$warnings): void
+    private function validateParentChild(string $parentType, string $childType, array &$warnings, string $path = ''): void
     {
         $map = $this->getHierarchyMap();
 
@@ -273,12 +349,12 @@ final class HierarchyValidator
         }
 
         if (! in_array($childType, $validChildren, true)) {
-            $warnings[] = sprintf(
+            $warnings[] = $this->issue('invalid-child', $path, $childType, sprintf(
                 'Element type "%s" may not be a valid child of "%s" (valid: %s).',
                 $childType,
                 $parentType,
                 implode(', ', $validChildren)
-            );
+            ));
         }
     }
 
@@ -333,7 +409,7 @@ final class HierarchyValidator
      * @param array<string, mixed> $element
      * @param string[]             $warnings
      */
-    private function checkComponentInstance(array $element, string $where, array &$warnings): void
+    private function checkComponentInstance(array $element, string $where, array &$warnings, string $path = ''): void
     {
         if ($this->components === null) {
             return;
@@ -342,7 +418,7 @@ final class HierarchyValidator
         $componentId = $element['component_id'] ?? null;
 
         if (! is_string($componentId) || trim($componentId) === '') {
-            $warnings[] = sprintf('%s is a component instance without a component_id.', $where);
+            $warnings[] = $this->issue('component-instance', $path, 'component', sprintf('%s is a component instance without a component_id.', $where));
             return;
         }
 
@@ -356,11 +432,11 @@ final class HierarchyValidator
         $component = $registry['components'][$componentId] ?? null;
 
         if (! is_array($component)) {
-            $warnings[] = sprintf(
+            $warnings[] = $this->issue('component-instance', $path, 'component', sprintf(
                 '%s uses component_id "%s", which is not in the component registry (see list_components).',
                 $where,
                 $componentId
-            );
+            ));
             return;
         }
 
@@ -381,13 +457,13 @@ final class HierarchyValidator
         $unknown = array_values(array_diff(array_map('strval', array_keys($pData)), $declared));
 
         if ($unknown !== []) {
-            $warnings[] = sprintf(
+            $warnings[] = $this->issue('component-instance', $path, 'component', sprintf(
                 '%s sets %s %s, which component "%s" does not declare.',
                 $where,
                 count($unknown) === 1 ? 'parameter' : 'parameters',
                 implode(', ', array_map(static fn(string $key): string => '"' . $key . '"', $unknown)),
                 $componentId
-            );
+            ));
         }
     }
 

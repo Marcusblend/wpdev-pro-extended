@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace ProExtended\Cornerstone;
 
 use ProExtended\Elements\ElementStamper;
+use ProExtended\Elements\LintContext;
 use ProExtended\Elements\SchemaExtractor;
+use ProExtended\Site\Features;
 
 /**
  * What this site's Cornerstone says about elements: each type's migration
@@ -40,6 +42,8 @@ final class ElementContext
     private ?array $versions = null;
 
     private ?string $tag = null;
+
+    private ?LintContext $lint = null;
 
     public function __construct(
         private readonly SchemaExtractor $schema,
@@ -129,5 +133,73 @@ final class ElementContext
     public function stamper(bool $dryRun = false): ElementStamper
     {
         return new ElementStamper($this->migrationVersions(), $this->breakpointTag(), $dryRun);
+    }
+
+    /**
+     * What ElementLint checks element data against on this site.
+     */
+    public function lintContext(): LintContext
+    {
+        return $this->lint ??= new LintContext(
+            $this->migrationVersions(),
+            $this->breakpointTag(),
+            $this->deprecatedTypes(),
+            Features::lintSwitches(),
+            $this->conditionChecker(),
+            $this->looperChecker(),
+        );
+    }
+
+    /**
+     * Types the registry files under "deprecated".
+     *
+     * @return string[]
+     */
+    private function deprecatedTypes(): array
+    {
+        $types = [];
+
+        try {
+            foreach ($this->schema->getAllDefinitions() as $definition) {
+                if (is_array($definition) && ($definition['group'] ?? null) === 'deprecated' && isset($definition['id'])) {
+                    $types[] = (string) $definition['id'];
+                }
+            }
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return $types;
+    }
+
+    /**
+     * Resolves a condition rule name the way RuleMatching::evaluate() does:
+     * a ConditionRules method or a cs_condition_rule_<name> filter.
+     *
+     * @return (\Closure(string): ?bool)|null
+     */
+    private function conditionChecker(): ?\Closure
+    {
+        $class = 'Themeco\\Cornerstone\\Util\\ConditionRules';
+
+        if (! class_exists($class)) {
+            return null;
+        }
+
+        return static fn(string $rule): ?bool => is_callable([$class, $rule]) || has_filter('cs_condition_rule_' . $rule);
+    }
+
+    /**
+     * @return (\Closure(string): ?bool)|null
+     */
+    private function looperChecker(): ?\Closure
+    {
+        $class = 'Themeco\\Cornerstone\\Services\\LooperProviders';
+
+        if (! class_exists($class) || ! method_exists($class, 'isValid')) {
+            return null;
+        }
+
+        return static fn(string $type): ?bool => (bool) $class::isValid($type);
     }
 }
