@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-17
+
+"Builder Parity": Pro Extended now writes pages the way Cornerstone's builder does, gives new elements the markers the builder gives them, and warns about element data Cornerstone would render differently than intended. It also reports the site's Cornerstone feature switches, reads Theme Options, and removes palette and font entries safely. Existing tools keep their names, required inputs and result shapes (new optional inputs and additional result keys only).
+
+### Added
+
+- **`get_theme_options`** (tool 26): the Theme Options panel sections with key counts and changed counts, and for a section, a list of keys, a search or `changed_only`, each option's control label, value, default, changed flag, designation and per-breakpoint values. Secret-looking values are redacted, Global CSS/JS and large values are reported by size, and the breakpoint tag (site and stored) is reported
+- **`stamp_new`** on `create_page`, `create_document` and `update_layout` (default `true`, `add` values only) and on `deploy_layout` (default `false`): missing `_m` migration markers (versions read from the live element registry) and `_bp_base` breakpoint tags are added to new elements; existing markers are never changed, and responsive data written for another breakpoint set keeps its own tag. Responses report `stamped`
+- **Coded validator warnings** (`ElementLint`): missing or mismatched markers, `_bp_data` keys, lengths and base slots; classic, deprecated, v2 row/column and internal types; `show_condition` shape, unknown rules and string post IDs; looper flags, unregistered providers and providers whose feature is off; unclosed, multi-line or unquoted Dynamic Content tokens and tokens that read outside input; `custom_atts`, `_p_json` and `_p_data` types; table cell text, spans and tags and table section tags; container links without an href, nested links; background layers whose advanced switch is off. Validation results gain `issues` (code, `update_layout` path, element type, message), `codes` and `issue_count`; `warnings` summarizes the issues per code and element type, and the existing structural warnings gain codes (`unknown-element`, `invalid-child`, `component-instance`)
+- **`get_site_info` `features`**: content storage mode, Twig, External API (with a description of its allowlist, never its entries), CSV, WPML, WooCommerce, ACF, the Max products the site knows about (whitelisted fields only, never package URLs) and the caller's Cornerstone permissions; `breakpoints.tag`. `wp pe doctor` prints the same information
+- **`remove` and `force`** on `set_colors` and `set_fonts`: entries (and groups) are removed by `_id`, dropped from group `children`, and first looked up across page element data and settings, documents, templates, theme options and other palette entries; an entry still in use is removed only with `force: true`, the response lists every use, and the last font cannot be removed
+- **`create_page`** reports `write_path` and `stamped`
+- **Tests**: unit tests for the stamper, the lint checks (a fixture per code), the Max summary, the Theme Options reader, item removal and reference patterns; smoke tests for page saves (including shortcode storage with `local=1`), stamps, warning codes, the feature report, Theme Options reads and removal
+
+### Changed
+
+- **Page writes go through Cornerstone's `Document::save()`** (`create_page`, `deploy_layout`, `update_layout`), so `Content::updateElements()` runs as in the builder: `_cornerstone_override` is cleared, `cornerstone_before_save_content`, `cornerstone_after_save_content` and `cs_save_document` fire once, and `post_content` is rebuilt in the site's storage mode (rendered HTML, or `[cs_content]` shortcodes on sites where `cs_document_build_as_html` is off). The per-request document cache is cleared before and after. The 1.1 direct write remains the fallback and now also clears the override flag
+- **`restore_layout` on a page** rebuilds `post_content` the way Cornerstone's storage migration does, in the site's storage mode
+- **`set_fonts`** without `fonts`, `config` or `remove` now reports `Pass "fonts", "config", "remove", or a combination.`
+
+### Fixed
+
+- **`_cs_last_save` was never set on API-path page saves**: Cornerstone only sets it from a listener that exists during its own REST requests. Pro Extended now sets it after every page save
+- **Backslashes in page titles were lost on save**: `Content::save()` hands post fields to `wp_update_post()` unslashed; the title and excerpt are now passed slashed so they are stored unchanged
+- **New elements rendered with legacy defaults**: elements created by 1.0 and 1.1 had no `_m` or `_bp_base`, so Cornerstone filled old defaults (a 96px bar, header navs as toggles) and rewrote grid, row and cell layouts. New elements are now stamped; `deploy_layout` warns about unmarked elements
+
 ## [1.1.0] - 2026-09-17
 
 "Site Foundations": the MCP server can now create the rest of a site's foundation — headers, footers, component documents and layouts, the global palette and fonts, Global CSS and media — with dry runs, automatic backups and the same cache clearing Cornerstone's builder does. Existing tools keep their names, input properties and success result shapes (new optional properties and additional result keys only).

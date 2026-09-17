@@ -204,7 +204,7 @@ Commands that write (`wp pe layout import`, and `wp pe mcp call` for any tool th
 
 ## Capabilities
 
-### MCP Tools (25)
+### MCP Tools (26)
 
 | Tool | Type | Description |
 |------|------|-------------|
@@ -212,15 +212,16 @@ Commands that write (`wp pe layout import`, and `wp pe mcp call` for any tool th
 | `get_element_schema` | Read | Get full schema for a specific element type (properties, defaults, options) |
 | `list_layouts` | Read | List all layouts (pages, headers, footers, layouts, component documents) with their doc type |
 | `get_layout` | Read | Get complete layout JSON with metadata and checksum; `summary` returns an outline, `path` one subtree |
-| `validate_layout` | Read | Validate layout structure, hierarchy, `_bp_data` and component instances |
+| `validate_layout` | Read | Validate layout structure, hierarchy, `_bp_data` and component instances, plus coded warnings for element data Cornerstone would render differently than intended |
 | `list_colors` | Read | Get the Cornerstone global color palette |
 | `list_fonts` | Read | Get global fonts and the font configuration |
-| `get_site_info` | Read | Versions, breakpoints, active plugins and a `health` block |
+| `get_site_info` | Read | Versions, breakpoints, active plugins, a `features` block (content storage, Twig, External API, CSV, WPML, WooCommerce, ACF, Max products, your Cornerstone permissions) and a `health` block |
 | `list_components` | Read | The component registry the builder uses (IDs, labels, slots, parameters, errors) |
 | `get_global_css` | Read | Global CSS size and managed blocks, one block, or the whole stylesheet |
 | `list_menus` | Read | Navigation menus with locations and `menu:<id>` references |
 | `list_settings_backups` | Read | Backups of colors, fonts, font config and Global CSS |
-| `create_page` | Write | Create a page (parent, order, template, excerpt), optionally with validated layout data |
+| `get_theme_options` | Read | Theme Options panel sections, and option values, defaults and responsive values (secrets redacted) |
+| `create_page` | Write | Create a page (parent, order, template, excerpt), optionally with validated layout data (new elements are stamped) |
 | `deploy_layout` | Write | Write layout data to a post (auto-backup + validation; full replace for documents) |
 | `backup_layout` | Write | Create a timestamped backup (up to 10 per post) |
 | `restore_layout` | Write | Restore from a backup |
@@ -229,8 +230,8 @@ Commands that write (`wp pe layout import`, and `wp pe mcp call` for any tool th
 | `create_document` | Write | Create a header, footer, component document, or single/archive layout |
 | `update_document_settings` | Write | Change a document's settings, title or slug without touching its elements |
 | `set_global_css` | Write | Create, replace or remove named Global CSS blocks (or replace the whole stylesheet) |
-| `set_colors` | Write | Add or update palette colors by `_id` |
-| `set_fonts` | Write | Add or update global fonts by `_id`, and merge font settings |
+| `set_colors` | Write | Add, update or remove palette colors by `_id` (removal checks where each color is used) |
+| `set_fonts` | Write | Add, update or remove global fonts by `_id` (removal checks where each font is used), and merge font settings |
 | `upload_media` | Write | Add images and web fonts (and, when allowed, SVGs) from HTTPS URLs or base64 |
 | `restore_settings` | Write | Put back a colors, fonts, font config or Global CSS backup |
 
@@ -241,9 +242,40 @@ Every tool declares MCP annotations (`title`, `readOnlyHint`, `destructiveHint`,
 - Every write backs up first. Layout and document writes are restored with `restore_layout`; colors, fonts, font config and Global CSS with `restore_settings` (the last 10 backups per key are kept).
 - The new write tools accept `dry_run: true`, which reports exactly what would change and writes nothing (not even a backup). Their responses include `warnings`, `backup_id` (or `backup_ids`) and `write_path`.
 - `write_path` is `cornerstone-api` when the write went through Cornerstone's own Document API (so its component registry, assignment rules and generated styles are refreshed exactly as the builder does), and `fallback` when Pro Extended wrote the same data directly and cleared those caches itself.
+- Page writes (`create_page`, `deploy_layout`, `update_layout`) go through `Document::save()` like a builder save: the `_cornerstone_override` flag is cleared, `cornerstone_before_save_content` / `cornerstone_after_save_content` and `cs_save_document` fire once, and `post_content` is rebuilt in the site's storage mode (rendered HTML, or `[cs_content]` shortcodes on sites that use them). As in the builder, the children of tabs, accordions and maps keep the `_id` Cornerstone gives them.
 - `deploy_layout` on a header, footer, layout or component document is a full replace of the shape `get_layout` returns. Settings the payload leaves out return to their defaults; the title, slug, a document's custom scripts/styles and a single/archive layout's type are kept.
 - A tool that fails while running returns a normal result with `isError: true` and the reason. Unknown tools, a missing tool name and missing capabilities are JSON-RPC errors.
 - Object and array arguments may also be sent as JSON strings; they are decoded before validation.
+
+#### New elements and warning codes
+
+Cornerstone gives every element it creates two markers: `_m` (`{"e": N}`, the element's migration version) and `_bp_base` (the site's breakpoint tag, `"4_4"` on a default Pro site). An element without them is treated as legacy content: a bar without `_m` is 96px tall instead of 100px, a collapsed nav in a header bar turns into a toggle, and a grid without `_bp_base` gets forced 4/2/1 columns.
+
+- `create_page`, `create_document` and `update_layout` (for `add` operations) add missing markers to the elements they write (`stamp_new`, default `true`). Existing markers are never changed.
+- `deploy_layout` stamps only with `stamp_new: true`, because content copied from a site may be legacy content whose look depends on the old defaults. Without it, it warns when markers are missing.
+- Every tool that validates returns warnings with stable codes. The result carries `issues` (`code`, `path` in `update_layout` notation, `type`, `message`), `codes` (a count per code) and `issue_count`, and `warnings` summarizes them per code and element type. Warnings never block a write; only data Cornerstone cannot load is an error.
+
+| Code | Meaning |
+|------|---------|
+| `missing-migration-marker` | The type has base migrations but the element has no `_m` |
+| `missing-breakpoint-base` | No `_bp_base` (Cornerstone runs its pre-6.0 breakpoint migration) |
+| `breakpoint-base-mismatch` | `_bp_base` is not the site's tag (or not a tag) |
+| `breakpoint-data-key` | A `_bp_data` key that does not match the element's tag, so it is ignored |
+| `breakpoint-data-length` | A responsive value list without one value per breakpoint |
+| `breakpoint-data-base-slot` | A value in the base breakpoint's slot, which is ignored |
+| `classic-element`, `deprecated-element`, `legacy-element`, `internal-element` | Types new content should not use |
+| `condition-shape`, `condition-unknown`, `condition-post-id` | `show_condition` rules Cornerstone cannot read, does not know, or never matches (string post IDs) |
+| `looper-shape`, `looper-feature-off` | Looper keys of the wrong type, unregistered providers, or providers whose feature is off |
+| `token-syntax`, `token-untrusted` | Dynamic Content tokens that will not expand, or that read outside input |
+| `custom-atts-type`, `parameters-type` | `custom_atts`, `_p_json` or `_p_data` of the wrong type |
+| `table-cell-text`, `table-cell-span`, `table-cell-tag`, `table-section-tag` | Table cells and sections that render differently than intended |
+| `link-without-href`, `nested-link` | Container links that render as a `div` or `span` |
+| `background-layers-off` | Background layers whose advanced switch is off |
+| `unknown-element`, `invalid-child`, `component-instance` | The structural warnings of earlier versions |
+
+#### Removing palette colors and fonts
+
+`set_colors` and `set_fonts` accept `remove` (entry or group IDs). Each removed entry is first looked up in page element data and settings, header/footer/layout/component documents, templates, theme options (Global CSS, variables and global parameters included) and other palette entries. An entry still in use is only removed with `force: true`; the response lists every use. Removing a group keeps its members, and the last font cannot be removed.
 
 #### References in layout data
 
@@ -302,6 +334,7 @@ wpdev-pro-extended/
     ├── Plugin.php               # Service container (lazy-loaded)
     ├── Cornerstone/
     │   ├── DocumentGateway.php  # The one adapter into Cornerstone internals (guarded, with fallbacks)
+    │   ├── ElementContext.php   # Migration versions, breakpoint tag and lint context from the live site
     │   ├── DocumentSettings.php # Allowed document settings per type
     │   └── ComponentScanner.php # Component exports, slots and parameters
     ├── Layouts/
@@ -310,18 +343,21 @@ wpdev-pro-extended/
     ├── Elements/
     │   ├── SchemaExtractor.php  # Wraps cornerstone('Elements') with transient cache
     │   ├── HierarchyValidator.php  # Layout validation engine
+    │   ├── ElementLint.php      # Coded element data warnings (plain PHP)
+    │   ├── ElementStamper.php   # _m and _bp_base markers for new elements (plain PHP)
+    │   ├── LintContext.php
     │   ├── ElementTree.php
     │   └── ValidationResult.php
-    ├── Settings/                # Palette/font merging, option backups
+    ├── Settings/                # Palette/font merging and removal, usage scans, theme option reads, option backups
     ├── Css/CssBlocks.php        # Managed Global CSS blocks
     ├── Media/                   # Media import, SVG allowlist
-    ├── Site/                    # Health report, host cache purging
+    ├── Site/                    # Health report, feature switches, Max products, host cache purging
     ├── Support/                 # Argument, JSON and diff helpers
     ├── Mcp/
     │   ├── Server.php           # JSON-RPC 2.0 router
     │   ├── Transport/
     │   │   └── StreamableHttp.php  # REST API endpoint (POST)
-    │   ├── Tools/               # 25 tool implementations
+    │   ├── Tools/               # 26 tool implementations
     │   │   ├── ToolInterface.php
     │   │   ├── AnnotatedToolInterface.php
     │   │   ├── ListElements.php
@@ -360,7 +396,7 @@ The plugin handles all three Cornerstone storage formats:
 | `cs_header`, `cs_footer`, `cs_layout`, `cs_layout_*` (including the WooCommerce types) | `post_content` | `{"settings", "regions": {"<region>": [...]}}` |
 | `cs_global_block` | `post_content` | `{"elements": {flat map keyed by ID}, "settings"}` |
 
-Header, footer, layout and component writes go through Cornerstone's Document API (`Document::create()` / `locate()`, `update()`, `save()`), which fires `cs_save_document`, `cs_save_{type}` and `cs_purge_tmp` like the builder. Page writes keep Pro Extended's own path and then fire `cs_save_document`. Legacy global blocks and legacy `cs_layout` posts are written directly.
+Header, footer, layout and component writes go through Cornerstone's Document API (`Document::create()` / `locate()`, `update()`, `save()`), which fires `cs_save_document`, `cs_save_{type}` (`cs_save_layout` for headers, footers and layouts, `cs_save_component` plus `cs_purge_tmp` for components) like the builder. Page writes go through `Document::save()` as well, which runs `Content::updateElements()` and fires `cs_save_document`; Pro Extended then sets `_cs_last_save`, which Cornerstone only sets during its own REST requests. When the Document API is unavailable, pages and documents are written directly and the same caches are cleared. Legacy global blocks and legacy `cs_layout` posts are written directly.
 
 **Critical safety patterns** applied:
 - **`wp_slash(wp_json_encode($data))`** before `update_post_meta()` — prevents WordPress from corrupting JSON escaping
@@ -374,6 +410,7 @@ Header, footer, layout and component writes go through Cornerstone's Document AP
 - Write tools require `manage_options` capability (`create_page` requires `publish_pages`, `upload_media` requires `upload_files`); `set_global_css` also needs `edit_css`
 - Document writes, custom CSS/JS and Raw Content require `unfiltered_html`
 - `upload_media` downloads only over HTTPS through `wp_safe_remote_get()`, caps the size, and accepts SVG only when enabled and only with allowlisted elements and attributes (anything else is refused, not stripped)
+- `get_site_info` never returns Max package URLs, External API allowlist entries or endpoint headers, and `get_theme_options` redacts secret-looking values
 - Input validation on all tool parameters; unknown keys and enum values are rejected
 - Layout structure validation before writes
 - Auto-backup before destructive operations
@@ -399,6 +436,13 @@ Header, footer, layout and component writes go through Cornerstone's Document AP
 - Media import (`upload_media`) and menu discovery (`list_menus`)
 - Writes through Cornerstone's Document API, so its caches stay correct
 - Tool annotations, `isError` results, dry runs, `wp pe doctor`
+
+### ✅ v1.2.0 — Builder Parity
+- Page writes through Cornerstone's `Document::save()` (override flag, save hooks, storage mode)
+- `_m` and `_bp_base` markers on new elements (`stamp_new`)
+- Coded validator warnings for element data (markers, breakpoints, conditions, loopers, tokens, attributes, tables, links, layers)
+- Feature report in `get_site_info`, and `get_theme_options`
+- Palette and font removal with a usage check
 
 ### 🔜 Planned — Design Tokens & Settings Sync
 - **Design Token System**: Centralized token registry, CSS custom property output, admin UI
@@ -432,7 +476,7 @@ If you find this project useful, consider supporting its development:
   bash /path/to/smoke/run.sh readonly <admin user ID>   # read-only calls and dry runs only
   ```
 
-  The write suite creates documents, pages and media titled `PE TEST …` (listed at the end of the run), briefly assigns a test header to the entire site, and writes test palette, font and Global CSS entries that it restores from their backups. Run it only on a staging site. The palette and font writes are skipped when those options already hold data.
+  The write suite creates documents, pages and media titled `PE TEST …` (listed at the end of the run), briefly assigns a test header to the entire site, and writes test palette, font and Global CSS entries that it restores from their backups. Run it only on a staging site. The palette and font writes are skipped when those options already hold data. On a disposable local site (`WP_ENVIRONMENT_TYPE` `local`), add `local=1` to also test shortcode page storage and palette and font removal on a non-empty palette.
 
 ### Pull requests
 

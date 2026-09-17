@@ -57,7 +57,7 @@ foreach (['x_product_validation_key', 'cs_api_endpoints', 'x_google_api_key', 's
 }
 
 T::same(true, ThemeOptionsReader::describe('cs_api_endpoints', [['headers' => 'x']], [], 'markup')['set'], 'reports that a redacted value is set');
-T::ok(! isset(ThemeOptionsReader::describe('x_keystone_mode', 'on', 'off', 'markup')['redacted']), 'does not redact a key that merely contains "key"');
+T::ok(! isset(ThemeOptionsReader::describe('x_monkey_mode', 'on', 'off', 'markup')['redacted']), 'does not redact a key that merely contains "key"');
 
 $code = ThemeOptionsReader::describe('x_custom_styles', 'body { color: red; }', '', 'markup');
 T::ok($code['value'] === null && $code['bytes'] === 20, 'reports Global CSS by size');
