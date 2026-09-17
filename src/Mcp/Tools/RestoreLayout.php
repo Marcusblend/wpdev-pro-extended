@@ -6,7 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Layouts\LayoutService;
 
-final class RestoreLayout implements ToolInterface
+final class RestoreLayout implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
@@ -19,7 +19,7 @@ final class RestoreLayout implements ToolInterface
 
     public function description(): string
     {
-        return 'Restore a Cornerstone layout from a previously created backup. If no backup_id is specified, the most recent backup is used.';
+        return 'Restore a Cornerstone layout from a previously created backup. If no backup_id is specified, the most recent backup is used. Backups taken by update_document_settings also restore the title and slug.';
     }
 
     public function inputSchema(): array
@@ -49,12 +49,22 @@ final class RestoreLayout implements ToolInterface
             throw new \InvalidArgumentException('post_id must be a positive integer.');
         }
 
+        if ($backupId !== null && ! is_string($backupId)) {
+            throw new \InvalidArgumentException('backup_id must be a string.');
+        }
+
         $success = $this->layouts->restore($postId, $backupId);
 
         return [
-            'restored' => $success,
-            'post_id'  => $postId,
+            'restored'   => $success,
+            'post_id'    => $postId,
+            'write_path' => $this->layouts->lastWrite()['path'],
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::write('Restore Layout', true, true);
     }
 
     public function requiredCapability(): string

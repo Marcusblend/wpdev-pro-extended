@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace ProExtended\Layouts;
 
+use ProExtended\Cornerstone\ComponentScanner;
+use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Elements\ElementTree;
+use ProExtended\Support\Json;
+
 /**
  * Service for reading, writing, backing up, and restoring Cornerstone layout data.
  *
@@ -26,7 +31,10 @@ final class LayoutService
     public const MAX_BACKUPS = 10;
 
     /**
-     * Cornerstone layout post types.
+     * Cornerstone layout post types (stored in post_content).
+     *
+     * Storage is detected from the post type name alone, so the WooCommerce
+     * layout types are listed even when WooCommerce is not registering them.
      */
     public const LAYOUT_POST_TYPES = [
         'cs_header',
@@ -34,6 +42,9 @@ final class LayoutService
         'cs_layout_single',
         'cs_layout_archive',
         'cs_global_block',
+        'cs_layout',
+        'cs_layout_single_wc',
+        'cs_layout_archive_wc',
     ];
 
     /**
@@ -44,6 +55,34 @@ final class LayoutService
         'post',
         ...self::LAYOUT_POST_TYPES,
     ];
+
+    private DocumentGateway $gateway;
+
+    /** @var array{path: string|null, warnings: string[]} */
+    private array $lastWrite = ['path' => null, 'warnings' => []];
+
+    public function __construct(?DocumentGateway $gateway = null)
+    {
+        $this->gateway = $gateway ?? new DocumentGateway();
+    }
+
+    public function gateway(): DocumentGateway
+    {
+        return $this->gateway;
+    }
+
+    /**
+     * How the most recent save() wrote its data.
+     *
+     * `path` is "cornerstone-api" when Cornerstone's Document API (or, for
+     * pages, its save hook) was used and "fallback" otherwise.
+     *
+     * @return array{path: string|null, warnings: string[]}
+     */
+    public function lastWrite(): array
+    {
+        return $this->lastWrite;
+    }
 
     /**
      * Get Cornerstone layout data for a post.
@@ -104,6 +143,7 @@ final class LayoutService
             );
         }
 
+        $this->lastWrite = ['path' => null, 'warnings' => []];
         $source = $this->detectSource($post);
 
         return $this->writeData($post, $source, $data);
@@ -114,9 +154,11 @@ final class LayoutService
      *
      * Uses `$wpdb` directly to preserve exact encoding.
      *
+     * @param  array<string, mixed> $extra Extra fields stored with the entry
+     *                                     (post_title, post_name, source_tool).
      * @return string Backup ID (timestamp).
      */
-    public function backup(int $postId): string
+    public function backup(int $postId, array $extra = []): string
     {
         /** @var \wpdb $wpdb */
         global $wpdb;
@@ -154,11 +196,14 @@ final class LayoutService
 
         $backupId = $this->uniqueBackupId($backups);
 
-        $backups[$backupId] = [
-            'source'     => $source,
-            'data'       => $rawData,
-            'created_at' => gmdate('c'),
-        ];
+        $backups[$backupId] = array_merge(
+            array_intersect_key($extra, array_flip(['post_title', 'post_name', 'source_tool'])),
+            [
+                'source'     => $source,
+                'data'       => $rawData,
+                'created_at' => gmdate('c'),
+            ]
+        );
 
         // Keep only the most recent backups.
         if (count($backups) > self::MAX_BACKUPS) {
@@ -279,10 +324,27 @@ final class LayoutService
             }
 
             clean_post_cache($postId);
+
+            // A backup taken by update_document_settings also puts the title
+            // and slug back. Older entries carry neither field.
+            if (($backup['source_tool'] ?? '') === 'update_document_settings') {
+                $this->restorePostFields($postId, $backup);
+            }
         }
 
         // Clear TSS cache.
         delete_post_meta($postId, '_cs_generated_tss');
+
+        $restored = get_post($postId);
+
+        if ($source === 'post_content' && $restored instanceof \WP_Post) {
+            // The same caches a save clears: component registry, assignment
+            // rules and generated styles.
+            $after = $this->gateway->afterRawWrite($restored);
+            $this->lastWrite = ['path' => $after['path'], 'warnings' => []];
+        } else {
+            $this->lastWrite = ['path' => $this->gateway->firePageSaved($postId)['path'], 'warnings' => []];
+        }
 
         return true;
     }
@@ -301,8 +363,11 @@ final class LayoutService
 
         $results = [];
 
-        // Layout post types (stored in post_content).
-        $layoutTypes = array_intersect($types, self::LAYOUT_POST_TYPES);
+        // Layout post types (stored in post_content) that this site registers.
+        $layoutTypes = array_values(array_filter(
+            array_intersect($types, self::LAYOUT_POST_TYPES),
+            'post_type_exists'
+        ));
 
         if (! empty($layoutTypes)) {
             $posts = get_posts([
@@ -314,13 +379,20 @@ final class LayoutService
             ]);
 
             foreach ($posts as $post) {
-                $results[] = [
+                $row = [
                     'id'       => $post->ID,
                     'title'    => $post->post_title,
                     'type'     => $post->post_type,
                     'status'   => $post->post_status,
                     'modified' => $post->post_modified_gmt,
+                    'doc_type' => $this->gateway->docTypeForPost($post),
                 ];
+
+                if ($post->post_type === 'cs_global_block') {
+                    $row += $this->componentDocumentInfo($post);
+                }
+
+                $results[] = $row;
             }
         }
 
@@ -345,6 +417,7 @@ final class LayoutService
                     'type'     => $post->post_type,
                     'status'   => $post->post_status,
                     'modified' => $post->post_modified_gmt,
+                    'doc_type' => 'content:' . $post->post_type,
                 ];
             }
         }
@@ -419,11 +492,11 @@ final class LayoutService
     }
 
     /**
-     * Detect which storage format a post uses.
+     * Detect which storage format a post uses, from its post type alone.
      *
      * @return 'post_meta'|'post_content'
      */
-    private function detectSource(\WP_Post $post): string
+    public function detectSource(\WP_Post $post): string
     {
         if (in_array($post->post_type, self::LAYOUT_POST_TYPES, true)) {
             return 'post_content';
@@ -482,11 +555,23 @@ final class LayoutService
      */
     private function writeData(\WP_Post $post, string $source, mixed $data): bool
     {
+        if ($source === 'post_content') {
+            return $this->writeDocument($post, $data);
+        }
+
+        // Raw Content is output without HTML filtering, so only users allowed
+        // to post unfiltered HTML may add it.
+        if (! current_user_can('unfiltered_html') && ElementTree::containsRawContent($data)) {
+            throw new \RuntimeException('Adding Raw Content elements requires the unfiltered_html capability.');
+        }
+
         $json = wp_json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         if ($json === false) {
             throw new \RuntimeException('Failed to encode layout data as JSON.');
         }
+
+        $result = false;
 
         if ($source === 'post_meta') {
             // CRITICAL: wp_slash() prevents update_post_meta() from corrupting JSON.
@@ -523,20 +608,160 @@ final class LayoutService
 
             // Compile layout data into rendered HTML and store in post_content.
             $this->renderToPostContent($post->ID);
-
-            // Track last save timestamp.
-            update_post_meta($post->ID, '_cs_last_save', time());
-        } else {
-            $result = wp_update_post([
-                'ID'           => $post->ID,
-                'post_content' => wp_slash($json),
-            ]);
-            $result = ($result !== 0 && ! is_wp_error($result));
         }
 
         // Clear TSS cache so Cornerstone regenerates compiled CSS.
         delete_post_meta($post->ID, '_cs_generated_tss');
 
+        // Fire the builder's save hook (last-save timestamps, Google Fonts
+        // request cache, document asset meta).
+        $this->lastWrite = ['path' => $this->gateway->firePageSaved($post->ID)['path'], 'warnings' => []];
+
         return (bool) $result;
+    }
+
+    /**
+     * Write a header, footer, layout or component document.
+     *
+     * Documents go through Cornerstone's Document API (via the gateway) so the
+     * component registry, assignment rules and generated styles are refreshed
+     * exactly as the builder refreshes them. The write is a full replace.
+     */
+    private function writeDocument(\WP_Post $post, mixed $data): bool
+    {
+        if (! is_array($data)) {
+            throw new \InvalidArgumentException(sprintf('Layout data for a %s must be an object.', $post->post_type));
+        }
+
+        $this->gateway->assertCanWriteDocuments();
+
+        // Legacy global blocks keep the direct write.
+        if ($this->gateway->isLegacyGlobalBlock($post)) {
+            $json = wp_json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            if ($json === false) {
+                throw new \RuntimeException('Failed to encode layout data as JSON.');
+            }
+
+            $this->gateway->writeRaw($post, $json);
+            $after = $this->gateway->afterRawWrite(get_post($post->ID) ?: $post);
+            $this->lastWrite = ['path' => $after['path'], 'warnings' => ['Legacy global block: written directly.']];
+
+            return true;
+        }
+
+        if ($post->post_type === 'cs_global_block') {
+            if (isset($data['elements']) && is_array($data['elements'])) {
+                $elements = $data['elements'];
+                $settings = array_key_exists('settings', $data) ? $this->settingsObject($data['settings']) : null;
+            } elseif (isset($data['e0']) && is_array($data['e0'])) {
+                $elements = $data;
+                $settings = null;
+            } else {
+                throw new \InvalidArgumentException(
+                    'Component documents are stored as {"elements": {"e0": ...}, "settings": {...}}. Pass that shape (get_layout returns it).'
+                );
+            }
+        } else {
+            $regions = $data['regions'] ?? null;
+
+            if (! is_array($regions) || ($regions !== [] && array_is_list($regions))) {
+                throw new \InvalidArgumentException(
+                    'Header, footer and layout documents are stored as {"settings": {...}, "regions": {"<region>": [...]}}. Pass that shape (get_layout returns it).'
+                );
+            }
+
+            foreach ($regions as $name => $region) {
+                if (! is_array($region) || ($region !== [] && ! array_is_list($region))) {
+                    throw new \InvalidArgumentException(sprintf('Region "%s" must be a list of elements.', (string) $name));
+                }
+            }
+
+            $elements = $regions;
+            $settings = array_key_exists('settings', $data) ? $this->settingsObject($data['settings']) : null;
+        }
+
+        $result = $this->gateway->replaceDocument($post->ID, $elements, $settings);
+        $this->lastWrite = ['path' => $result['path'], 'warnings' => $result['warnings']];
+
+        return true;
+    }
+
+    /**
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function settingsObject(mixed $settings): array
+    {
+        if (! is_array($settings) || ($settings !== [] && array_is_list($settings))) {
+            throw new \InvalidArgumentException('"settings" must be an object.');
+        }
+
+        return $settings;
+    }
+
+    /**
+     * Put back the title and slug recorded in a backup, without re-saving
+     * post_content (a full wp_update_post() would run content filters over the
+     * stored JSON).
+     *
+     * @param array<string, mixed> $backup
+     */
+    private function restorePostFields(int $postId, array $backup): void
+    {
+        global $wpdb;
+
+        $post = get_post($postId);
+
+        if (! $post instanceof \WP_Post) {
+            return;
+        }
+
+        $fields = [];
+
+        if (isset($backup['post_title']) && is_string($backup['post_title'])) {
+            $fields['post_title'] = $backup['post_title'];
+        }
+
+        if (isset($backup['post_name']) && is_string($backup['post_name']) && $backup['post_name'] !== $post->post_name) {
+            $fields['post_name'] = wp_unique_post_slug(
+                $backup['post_name'],
+                $postId,
+                $post->post_status,
+                $post->post_type,
+                (int) $post->post_parent
+            );
+        }
+
+        if ($fields === []) {
+            return;
+        }
+
+        $wpdb->update($wpdb->posts, $fields, ['ID' => $postId]);
+        clean_post_cache($postId);
+    }
+
+    /**
+     * Component-document details for list_layouts.
+     *
+     * @return array{format: string, library_group: mixed, document_visibility: mixed, component_count: int}
+     */
+    private function componentDocumentInfo(\WP_Post $post): array
+    {
+        if ($this->gateway->isLegacyGlobalBlock($post)) {
+            return ['format' => 'legacy', 'library_group' => null, 'document_visibility' => null, 'component_count' => 0];
+        }
+
+        $data = Json::decodeStored($post->post_content) ?? [];
+        $settings = is_array($data['settings'] ?? null) ? $data['settings'] : [];
+        $elements = is_array($data['elements'] ?? null) ? $data['elements'] : [];
+
+        return [
+            'format'              => 'component',
+            'library_group'       => $settings['library_group'] ?? '',
+            'document_visibility' => $settings['document_visibility'] ?? '',
+            'component_count'     => count(ComponentScanner::scan($elements)['components']),
+        ];
     }
 }

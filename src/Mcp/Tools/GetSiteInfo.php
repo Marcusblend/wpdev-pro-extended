@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
-final class GetSiteInfo implements ToolInterface
+use ProExtended\Site\Health;
+
+final class GetSiteInfo implements ToolInterface, AnnotatedToolInterface
 {
+    public function __construct(
+        private readonly ?Health $health = null,
+    ) {}
+
     public function name(): string
     {
         return 'get_site_info';
@@ -13,7 +19,7 @@ final class GetSiteInfo implements ToolInterface
 
     public function description(): string
     {
-        return 'Get WordPress site information including versions, theme details, breakpoint configuration, and active plugins.';
+        return 'Get WordPress site information including versions, theme details, breakpoint configuration, and active plugins, plus a health block (permalinks, application passwords, capabilities, Cornerstone adapter, component registry, cache purging, settings).';
     }
 
     public function inputSchema(): array
@@ -47,7 +53,7 @@ final class GetSiteInfo implements ToolInterface
             $pluginNames[] = $pluginData['Name'] ?? basename($plugin, '.php');
         }
 
-        return [
+        $info = [
             'site_url'        => get_site_url(),
             'home_url'        => get_home_url(),
             'wordpress'       => get_bloginfo('version'),
@@ -72,6 +78,17 @@ final class GetSiteInfo implements ToolInterface
             ],
             'active_plugins'  => $pluginNames,
         ];
+
+        if ($this->health !== null) {
+            $info['health'] = $this->health->report();
+        }
+
+        return $info;
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('Get Site Info');
     }
 
     public function requiredCapability(): string

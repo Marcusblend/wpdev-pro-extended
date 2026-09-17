@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Commands;
 
+use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
 
 /**
@@ -20,6 +21,7 @@ final class LayoutCommand
 {
     public function __construct(
         private readonly LayoutService $layouts,
+        private readonly ?HierarchyValidator $validator = null,
     ) {}
 
     /**
@@ -128,15 +130,23 @@ final class LayoutCommand
      * [--post_id=<id>]
      * : Override the target post ID.
      *
+     * The data is validated first, and the command needs --user=<ID> of a
+     * user with the unfiltered_html capability (without a user WordPress
+     * filters post_content and damages the layout).
+     *
      * ## EXAMPLES
      *
-     *     wp pe layout import layout-42.json
-     *     wp pe layout import layout.json --post_id=99
+     *     wp pe layout import layout-42.json --user=1
+     *     wp pe layout import layout.json --post_id=99 --user=1
      *
      * @subcommand import
      */
     public function import(array $args, array $assocArgs): void
     {
+        if (! current_user_can('unfiltered_html')) {
+            \WP_CLI::error('Run this with --user=<ID> of a user who has the unfiltered_html capability (an administrator).');
+        }
+
         $file = $args[0] ?? '';
 
         if (empty($file) || ! file_exists($file)) {
@@ -145,6 +155,12 @@ final class LayoutCommand
 
         // phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents
         $json = file_get_contents($file);
+
+        if ($json === false) {
+            \WP_CLI::error('Could not read ' . $file);
+            return;
+        }
+
         $envelope = json_decode($json, true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
@@ -163,18 +179,47 @@ final class LayoutCommand
             \WP_CLI::error('No "data" key found in the JSON envelope.');
         }
 
+        $post = get_post($postId);
+
+        if (! $post) {
+            \WP_CLI::error(sprintf('Post %d does not exist.', $postId));
+            return;
+        }
+
+        if ($this->validator !== null) {
+            $context = $post->post_type === 'cs_global_block' ? 'flat' : 'inline';
+            $validation = $this->validator->validate($data, $context);
+
+            foreach ($validation->warnings as $warning) {
+                \WP_CLI::warning($warning);
+            }
+
+            if (! $validation->valid) {
+                \WP_CLI::error('The layout failed validation; nothing was imported.' . "\n - " . implode("\n - ", $validation->errors));
+            }
+        }
+
         // Backup before import.
         try {
-            $backupId = $this->layouts->backup($postId);
+            $backupId = $this->layouts->backup($postId, ['source_tool' => 'wp pe layout import']);
             \WP_CLI::log(sprintf('Backup created: %s', $backupId));
         } catch (\Throwable) {
             \WP_CLI::warning('Could not create backup (post may not have existing data).');
         }
 
-        $success = $this->layouts->save($postId, $data);
+        try {
+            $success = $this->layouts->save($postId, $data);
+        } catch (\Throwable $e) {
+            \WP_CLI::error('Failed to import layout: ' . $e->getMessage());
+            return;
+        }
+
+        foreach ($this->layouts->lastWrite()['warnings'] as $warning) {
+            \WP_CLI::warning($warning);
+        }
 
         if ($success) {
-            \WP_CLI::success(sprintf('Layout imported to post %d.', $postId));
+            \WP_CLI::success(sprintf('Layout imported to post %d (%s).', $postId, (string) $this->layouts->lastWrite()['path']));
         } else {
             \WP_CLI::error('Failed to import layout.');
         }

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
-final class ListColors implements ToolInterface
+final class ListColors implements ToolInterface, AnnotatedToolInterface
 {
     public function name(): string
     {
@@ -42,6 +42,11 @@ final class ListColors implements ToolInterface
             'count'  => count($colors),
             'colors' => $colors,
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('List Colors');
     }
 
     public function requiredCapability(): string

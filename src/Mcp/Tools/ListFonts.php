@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
-final class ListFonts implements ToolInterface
+use ProExtended\Support\Json;
+
+final class ListFonts implements ToolInterface, AnnotatedToolInterface
 {
     public function name(): string
     {
@@ -38,16 +40,20 @@ final class ListFonts implements ToolInterface
             $fonts = [];
         }
 
-        $fontConfig = get_option('cornerstone_font_config', '{}');
-        if (is_string($fontConfig)) {
-            $fontConfig = json_decode($fontConfig, true) ?: [];
-        }
+        // Cornerstone stores the config slashed (wp_slash(cs_json_encode())),
+        // and the options API does not unslash, so decode both forms.
+        $fontConfig = Json::decodeStored(get_option('cornerstone_font_config', '{}')) ?? [];
 
         return [
             'count'  => count($fonts),
             'fonts'  => $fonts,
-            'config' => $fontConfig,
+            'config' => $fontConfig === [] ? (object) [] : $fontConfig,
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('List Fonts');
     }
 
     public function requiredCapability(): string

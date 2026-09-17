@@ -6,8 +6,10 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Support\JsonArgs;
+use ProExtended\Support\SkipValidation;
 
-final class UpdateLayout implements ToolInterface
+final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
@@ -66,6 +68,7 @@ final class UpdateLayout implements ToolInterface
 
     public function execute(array $arguments): mixed
     {
+        $arguments      = JsonArgs::decode($arguments, ['operations']);
         $postId         = (int) ($arguments['post_id'] ?? 0);
         $operations     = $arguments['operations'] ?? [];
         $skipValidation = (bool) ($arguments['skip_validation'] ?? false);
@@ -76,6 +79,15 @@ final class UpdateLayout implements ToolInterface
 
         if (! is_array($operations) || empty($operations)) {
             throw new \InvalidArgumentException('At least one operation is required.');
+        }
+
+        SkipValidation::assertAllowed($skipValidation);
+
+        // Some clients send an operation's value as a JSON string.
+        foreach ($operations as $index => $op) {
+            if (is_array($op) && array_key_exists('value', $op)) {
+                $operations[$index]['value'] = JsonArgs::decodeValue($op['value'], sprintf('operations[%s].value', (string) $index));
+            }
         }
 
         $envelope = $this->layouts->get($postId);
@@ -159,27 +171,31 @@ final class UpdateLayout implements ToolInterface
         $backupId = null;
 
         try {
-            $backupId = $this->layouts->backup($postId);
+            $backupId = $this->layouts->backup($postId, ['source_tool' => 'update_layout']);
         } catch (\Throwable $e) {
             $warnings[] = 'Backup was not created: ' . $e->getMessage();
         }
 
         $saved = $this->layouts->save($postId, $data);
+        $write = $this->layouts->lastWrite();
 
         if (! $saved) {
             $errors[] = sprintf('Writing the patched layout to post %d failed.', $postId);
         }
 
-        return $this->result(
+        $result = $this->result(
             $postId,
             $saved,
             $saved ? $total : 0,
             $total,
             $backupId,
-            $warnings,
+            array_merge($warnings, $write['warnings']),
             $errors,
             $validation
         );
+        $result['write_path'] = $write['path'];
+
+        return $result;
     }
 
     /**
@@ -320,6 +336,11 @@ final class UpdateLayout implements ToolInterface
     private function parsePath(string $path): array
     {
         return array_filter(explode('.', $path), fn($s) => $s !== '');
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::write('Update Layout', true, false);
     }
 
     public function requiredCapability(): string

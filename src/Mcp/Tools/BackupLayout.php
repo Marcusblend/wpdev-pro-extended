@@ -6,7 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Layouts\LayoutService;
 
-final class BackupLayout implements ToolInterface
+final class BackupLayout implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
@@ -51,6 +51,11 @@ final class BackupLayout implements ToolInterface
             'backup_id' => $backupId,
             'message'   => sprintf('Backup created successfully with ID "%s".', $backupId),
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::write('Back Up Layout', false, false);
     }
 
     public function requiredCapability(): string

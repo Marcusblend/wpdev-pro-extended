@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace ProExtended\Elements;
 
+use ProExtended\Cornerstone\ComponentScanner;
+use ProExtended\Cornerstone\DocumentGateway;
+
 /**
  * Validates Cornerstone layout data against element hierarchy rules and data format requirements.
  */
@@ -12,8 +15,14 @@ final class HierarchyValidator
     /** @var array<string, string[]> Cached hierarchy map. */
     private ?array $hierarchyMap = null;
 
+    /**
+     * @param DocumentGateway|null $components Source of the component registry;
+     *                                         without it component instances
+     *                                         are not checked.
+     */
     public function __construct(
         private readonly SchemaExtractor $schema,
+        private readonly ?DocumentGateway $components = null,
     ) {}
 
     /**
@@ -163,6 +172,10 @@ final class HierarchyValidator
                 $this->validateParentChild($parentType, $type, $warnings);
             }
 
+            if ($type === 'component') {
+                $this->checkComponentInstance($element, sprintf('Element at index %d', $index), $warnings);
+            }
+
             // Validate _bp_data format.
             $this->validateBreakpointData($element, $type, $errors);
 
@@ -201,6 +214,10 @@ final class HierarchyValidator
                 $warnings[] = sprintf('Unknown element type "%s" for element "%s".', $type, $id);
             }
 
+            if ($type === 'component') {
+                $this->checkComponentInstance($element, sprintf('Element "%s"', $id), $warnings);
+            }
+
             // Check _id consistency.
             if (isset($element['_id']) && $element['_id'] !== $id) {
                 $errors[] = sprintf('Element "%s" has mismatched _id "%s".', $id, $element['_id']);
@@ -227,6 +244,8 @@ final class HierarchyValidator
 
     /**
      * Validate parent-child relationship.
+     *
+     * @param string[] $warnings
      */
     private function validateParentChild(string $parentType, string $childType, array &$warnings): void
     {
@@ -303,6 +322,72 @@ final class HierarchyValidator
                     );
                 }
             }
+        }
+    }
+
+    /**
+     * Warn when a component instance points at a component the registry does
+     * not know, or sets top-level parameters the component does not declare.
+     * Warnings only: the registry may be about to change.
+     *
+     * @param array<string, mixed> $element
+     * @param string[]             $warnings
+     */
+    private function checkComponentInstance(array $element, string $where, array &$warnings): void
+    {
+        if ($this->components === null) {
+            return;
+        }
+
+        $componentId = $element['component_id'] ?? null;
+
+        if (! is_string($componentId) || trim($componentId) === '') {
+            $warnings[] = sprintf('%s is a component instance without a component_id.', $where);
+            return;
+        }
+
+        try {
+            $registry = $this->components->componentRegistry();
+        } catch (\Throwable) {
+            return;
+        }
+
+        $componentId = trim($componentId);
+        $component = $registry['components'][$componentId] ?? null;
+
+        if (! is_array($component)) {
+            $warnings[] = sprintf(
+                '%s uses component_id "%s", which is not in the component registry (see list_components).',
+                $where,
+                $componentId
+            );
+            return;
+        }
+
+        $pData = $element['_p_data'] ?? null;
+
+        if (is_string($pData)) {
+            $decoded = json_decode($pData, true);
+            $pData = is_array($decoded) ? $decoded : null;
+        }
+
+        if (! is_array($pData) || $pData === []) {
+            return;
+        }
+
+        $rootId = (string) ($component['root'] ?? '');
+        $root = is_array($component['data'][$rootId] ?? null) ? $component['data'][$rootId] : [];
+        $declared = ComponentScanner::declaredParameters($root['_p_json'] ?? null) ?? [];
+        $unknown = array_values(array_diff(array_map('strval', array_keys($pData)), $declared));
+
+        if ($unknown !== []) {
+            $warnings[] = sprintf(
+                '%s sets %s %s, which component "%s" does not declare.',
+                $where,
+                count($unknown) === 1 ? 'parameter' : 'parameters',
+                implode(', ', array_map(static fn(string $key): string => '"' . $key . '"', $unknown)),
+                $componentId
+            );
         }
     }
 

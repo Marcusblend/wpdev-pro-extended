@@ -6,7 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Layouts\LayoutService;
 
-final class ListLayouts implements ToolInterface
+final class ListLayouts implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
@@ -19,7 +19,7 @@ final class ListLayouts implements ToolInterface
 
     public function description(): string
     {
-        return 'List all Cornerstone layouts including pages, headers, footers, singles, archives, and global blocks.';
+        return 'List all Cornerstone layouts including pages, headers, footers, singles, archives, and component documents. Each row has a doc_type; component documents also report format (component or legacy), library_group, document_visibility and component_count.';
     }
 
     public function inputSchema(): array
@@ -46,6 +46,11 @@ final class ListLayouts implements ToolInterface
             'count'   => count($layouts),
             'layouts' => $layouts,
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('List Layouts');
     }
 
     public function requiredCapability(): string

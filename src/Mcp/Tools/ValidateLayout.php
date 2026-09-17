@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\HierarchyValidator;
+use ProExtended\Support\JsonArgs;
 
-final class ValidateLayout implements ToolInterface
+final class ValidateLayout implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly HierarchyValidator $validator,
@@ -19,7 +20,7 @@ final class ValidateLayout implements ToolInterface
 
     public function description(): string
     {
-        return 'Validate a Cornerstone layout JSON structure against the element schema. Checks element types, hierarchy rules, and _bp_data format.';
+        return 'Validate a Cornerstone layout JSON structure against the element schema. Checks element types, hierarchy rules, _bp_data format, and component instances (unknown component_id or undeclared parameters produce warnings).';
     }
 
     public function inputSchema(): array
@@ -43,6 +44,7 @@ final class ValidateLayout implements ToolInterface
 
     public function execute(array $arguments): mixed
     {
+        $arguments = JsonArgs::decode($arguments, ['layout_data']);
         $layoutData = $arguments['layout_data'] ?? null;
         $context = $arguments['context'] ?? 'inline';
 
@@ -50,9 +52,18 @@ final class ValidateLayout implements ToolInterface
             throw new \InvalidArgumentException('layout_data is required.');
         }
 
+        if (! in_array($context, ['inline', 'flat'], true)) {
+            throw new \InvalidArgumentException('Invalid context. Must be "inline" or "flat".');
+        }
+
         $result = $this->validator->validate($layoutData, $context);
 
         return $result->toArray();
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('Validate Layout');
     }
 
     public function requiredCapability(): string

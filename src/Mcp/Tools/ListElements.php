@@ -6,7 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\SchemaExtractor;
 
-final class ListElements implements ToolInterface
+final class ListElements implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly SchemaExtractor $schema,
@@ -49,6 +49,11 @@ final class ListElements implements ToolInterface
             'count'    => count($elements),
             'elements' => $elements,
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('List Elements');
     }
 
     public function requiredCapability(): string

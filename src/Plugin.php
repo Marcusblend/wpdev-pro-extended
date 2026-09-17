@@ -50,6 +50,7 @@ final class Plugin
     {
         $this->layoutCommand()->register();
         $this->mcpCommand()->register();
+        $this->doctorCommand()->register();
     }
 
     // ─── Service Accessors (Lazy-loaded) ─────────────────────────────────────
@@ -59,6 +60,9 @@ final class Plugin
         return $this->resolve('mcp.server', fn() => new Mcp\Server(
             $this->schemaExtractor(),
             $this->layoutService(),
+            $this->documentGateway(),
+            $this->settingsBackups(),
+            $this->hostCache(),
         ));
     }
 
@@ -69,9 +73,37 @@ final class Plugin
         ));
     }
 
+    public function documentGateway(): Cornerstone\DocumentGateway
+    {
+        return $this->resolve('cornerstone.gateway', fn() => new Cornerstone\DocumentGateway());
+    }
+
     public function layoutService(): Layouts\LayoutService
     {
-        return $this->resolve('layouts.service', fn() => new Layouts\LayoutService());
+        return $this->resolve('layouts.service', fn() => new Layouts\LayoutService(
+            $this->documentGateway(),
+        ));
+    }
+
+    public function settingsBackups(): Settings\SettingsBackups
+    {
+        return $this->resolve('settings.backups', fn() => new Settings\SettingsBackups(
+            $this->documentGateway(),
+        ));
+    }
+
+    public function hostCache(): Site\HostCache
+    {
+        return $this->resolve('site.host_cache', fn() => new Site\HostCache());
+    }
+
+    public function health(): Site\Health
+    {
+        return $this->resolve('site.health', fn() => new Site\Health(
+            $this->documentGateway(),
+            $this->hostCache(),
+            $this->mcpServer(),
+        ));
     }
 
     public function schemaExtractor(): Elements\SchemaExtractor
@@ -83,6 +115,7 @@ final class Plugin
     {
         return $this->resolve('elements.hierarchy', fn() => new Elements\HierarchyValidator(
             $this->schemaExtractor(),
+            $this->documentGateway(),
         ));
     }
 
@@ -90,6 +123,7 @@ final class Plugin
     {
         return $this->resolve('commands.layout', fn() => new Commands\LayoutCommand(
             $this->layoutService(),
+            $this->hierarchyValidator(),
         ));
     }
 
@@ -97,6 +131,13 @@ final class Plugin
     {
         return $this->resolve('commands.mcp', fn() => new Commands\McpCommand(
             $this->mcpServer(),
+        ));
+    }
+
+    public function doctorCommand(): Commands\DoctorCommand
+    {
+        return $this->resolve('commands.doctor', fn() => new Commands\DoctorCommand(
+            $this->health(),
         ));
     }
 

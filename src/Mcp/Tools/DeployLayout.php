@@ -6,8 +6,10 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Support\JsonArgs;
+use ProExtended\Support\SkipValidation;
 
-final class DeployLayout implements ToolInterface
+final class DeployLayout implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly LayoutService $layouts,
@@ -21,7 +23,7 @@ final class DeployLayout implements ToolInterface
 
     public function description(): string
     {
-        return 'Deploy (write) Cornerstone layout data to a post. Automatically creates a backup before writing and validates the data. Use with caution — this overwrites the existing layout.';
+        return 'Deploy (write) Cornerstone layout data to a post. Automatically creates a backup before writing and validates the data. Use with caution — this overwrites the existing layout. For headers, footers, layouts and component documents this is a full replace of the shape get_layout returns: settings left out return to their defaults (title, slug and a single/archive layout\'s type are kept).';
     }
 
     public function inputSchema(): array
@@ -52,6 +54,7 @@ final class DeployLayout implements ToolInterface
 
     public function execute(array $arguments): mixed
     {
+        $arguments      = JsonArgs::decode($arguments, ['layout_data']);
         $postId         = (int) ($arguments['post_id'] ?? 0);
         $layoutData     = $arguments['layout_data'] ?? null;
         $skipValidation = (bool) ($arguments['skip_validation'] ?? false);
@@ -64,6 +67,8 @@ final class DeployLayout implements ToolInterface
         if ($layoutData === null) {
             throw new \InvalidArgumentException('layout_data is required.');
         }
+
+        SkipValidation::assertAllowed($skipValidation);
 
         $post = get_post($postId);
         if (! $post) {
@@ -102,7 +107,7 @@ final class DeployLayout implements ToolInterface
 
         if (! $skipBackup) {
             try {
-                $backupId = $this->layouts->backup($postId);
+                $backupId = $this->layouts->backup($postId, ['source_tool' => 'deploy_layout']);
             } catch (\Throwable $e) {
                 // Usually a first deploy with no existing data to back up, but
                 // report it either way — silently skipping the backup is exactly
@@ -113,13 +118,20 @@ final class DeployLayout implements ToolInterface
 
         // Deploy.
         $success = $this->layouts->save($postId, $layoutData);
+        $write = $this->layouts->lastWrite();
 
         return [
-            'deployed'  => $success,
-            'post_id'   => $postId,
-            'backup_id' => $backupId,
-            'warnings'  => $warnings,
+            'deployed'   => $success,
+            'post_id'    => $postId,
+            'backup_id'  => $backupId,
+            'warnings'   => array_merge($warnings, $write['warnings']),
+            'write_path' => $write['path'],
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::write('Deploy Layout', true, true);
     }
 
     public function requiredCapability(): string

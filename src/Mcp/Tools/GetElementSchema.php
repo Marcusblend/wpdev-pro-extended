@@ -6,7 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\SchemaExtractor;
 
-final class GetElementSchema implements ToolInterface
+final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
 {
     public function __construct(
         private readonly SchemaExtractor $schema,
@@ -58,6 +58,11 @@ final class GetElementSchema implements ToolInterface
             'definition' => $definition,
             'defaults'   => $defaults,
         ];
+    }
+
+    public function annotations(): array
+    {
+        return Annotations::read('Get Element Schema');
     }
 
     public function requiredCapability(): string

@@ -4,10 +4,19 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp;
 
+use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Layouts\LayoutService;
-use ProExtended\Mcp\Tools\ToolInterface;
 use ProExtended\Mcp\Resources\ResourceInterface;
+use ProExtended\Mcp\Tools\AnnotatedToolInterface;
+use ProExtended\Mcp\Tools\ToolInterface;
+use ProExtended\Media\MediaImporter;
+use ProExtended\Settings\SettingsBackups;
+use ProExtended\Site\Health;
+use ProExtended\Site\HostCache;
+use ProExtended\Support\Json;
+use ProExtended\Support\JsonArgs;
 
 /**
  * MCP Server — JSON-RPC 2.0 router.
@@ -18,6 +27,11 @@ use ProExtended\Mcp\Resources\ResourceInterface;
  *   - tools/call
  *   - resources/list
  *   - resources/read
+ *
+ * Protocol problems (unknown tool, missing tool name, a caller without the
+ * tool's required capability) are JSON-RPC errors. Anything that goes wrong
+ * while a tool runs is a normal result with `isError: true`, as the MCP spec
+ * requires, so the model sees the message.
  */
 final class Server
 {
@@ -32,6 +46,16 @@ final class Server
     private const ERR_INVALID_PAR = -32602;
     private const ERR_INTERNAL    = -32603;
 
+    private const INSTRUCTIONS = <<<'TXT'
+Pro Extended reads and writes Cornerstone (Pro theme) sites.
+- Every write backs up first: undo layout writes with restore_layout and settings writes with restore_settings.
+- Never pass skip_validation or skip_backup.
+- Run every set_* tool with dry_run: true first and review what would change.
+- References inside layouts: colors "global-color:<_id>" (with alpha "global-color:<_id>:0.5"), font family "global-ff:<_id>", font weight "global-fw:<_id>|fw-normal" or "global-fw:<_id>|fw-bold", images "<attachment_id>:full", menus "menu:<term_id>".
+- Call list_components before composing component instances ({"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}).
+- For large documents call get_layout with summary: true first, then fetch one subtree with path.
+TXT;
+
     /** @var array<string, ToolInterface> */
     private array $tools = [];
 
@@ -41,9 +65,15 @@ final class Server
     /** @var bool Whether tools have been registered. */
     private bool $toolsRegistered = false;
 
+    /** @var array<string, string> Tool or resource name => why it was not registered. */
+    private array $registrationErrors = [];
+
     public function __construct(
         private readonly SchemaExtractor $schema,
         private readonly LayoutService $layouts,
+        private readonly ?DocumentGateway $gateway = null,
+        private readonly ?SettingsBackups $backups = null,
+        private readonly ?HostCache $hostCache = null,
     ) {}
 
     /**
@@ -73,6 +103,10 @@ final class Server
 
         if (! is_string($method) || $method === '') {
             return $this->error($id, self::ERR_INVALID_REQ, 'Missing or invalid method.');
+        }
+
+        if (! is_array($params)) {
+            $params = [];
         }
 
         return match ($method) {
@@ -113,6 +147,35 @@ final class Server
         return $this->tools;
     }
 
+    /**
+     * Tools and resources that failed to register, with the reason.
+     *
+     * @return array<string, string>
+     */
+    public function getRegistrationErrors(): array
+    {
+        $this->ensureToolsRegistered();
+        return $this->registrationErrors;
+    }
+
+    /**
+     * MCP annotations for a tool (empty for tools that declare none).
+     *
+     * @return array<string, mixed>
+     */
+    public function annotationsFor(ToolInterface $tool): array
+    {
+        if (! $tool instanceof AnnotatedToolInterface) {
+            return [];
+        }
+
+        try {
+            return $tool->annotations();
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
     // ─── MCP Method Handlers ─────────────────────────────────────────────────
 
     /**
@@ -134,6 +197,7 @@ final class Server
                 'name'    => self::SERVER_NAME,
                 'version' => PE_VERSION,
             ],
+            'instructions' => self::INSTRUCTIONS,
         ]);
     }
 
@@ -148,11 +212,25 @@ final class Server
         $toolList = [];
 
         foreach ($this->tools as $tool) {
-            $toolList[] = [
+            $entry = [
                 'name'        => $tool->name(),
                 'description' => $tool->description(),
                 'inputSchema' => $tool->inputSchema(),
             ];
+
+            $annotations = $this->annotationsFor($tool);
+
+            if ($annotations !== []) {
+                // 2025-03-26 reads the title from annotations; newer clients
+                // read a top-level title.
+                if (isset($annotations['title'])) {
+                    $entry['title'] = $annotations['title'];
+                }
+
+                $entry['annotations'] = $annotations;
+            }
+
+            $toolList[] = $entry;
         }
 
         return $this->success($id, ['tools' => $toolList]);
@@ -190,20 +268,26 @@ final class Server
         }
 
         try {
+            if (is_string($arguments)) {
+                $arguments = JsonArgs::decodeValue($arguments, 'arguments');
+            }
+
+            if (! is_array($arguments)) {
+                throw new \InvalidArgumentException('Tool arguments must be an object.');
+            }
+
             $result = $tool->execute($arguments);
 
             return $this->success($id, [
                 'content' => [
                     [
                         'type' => 'text',
-                        'text' => is_string($result) ? $result : wp_json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        'text' => is_string($result) ? $result : Json::pretty($result),
                     ],
                 ],
             ]);
-        } catch (\InvalidArgumentException $e) {
-            return $this->error($id, self::ERR_INVALID_PAR, $e->getMessage());
         } catch (\Throwable $e) {
-            return $this->error($id, self::ERR_INTERNAL, $e->getMessage());
+            return $this->toolError($id, $toolName, $e);
         }
     }
 
@@ -258,7 +342,7 @@ final class Server
                     [
                         'uri'      => $resource->uri(),
                         'mimeType' => $resource->mimeType(),
-                        'text'     => is_string($content) ? $content : wp_json_encode($content, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        'text'     => is_string($content) ? $content : Json::pretty($content),
                     ],
                 ],
             ]);
@@ -271,6 +355,10 @@ final class Server
 
     /**
      * Register all built-in tools and resources if not yet done.
+     *
+     * Each tool is registered on its own: if one cannot be constructed (for
+     * example because a class it needs is missing), it is logged and skipped
+     * and every other tool keeps working.
      */
     private function ensureToolsRegistered(): void
     {
@@ -280,32 +368,81 @@ final class Server
 
         $this->toolsRegistered = true;
 
+        $gateway   = $this->gateway ?? $this->layouts->gateway();
+        $backups   = $this->backups ?? new SettingsBackups($gateway);
+        $hostCache = $this->hostCache ?? new HostCache();
+        $schema    = $this->schema;
+        $layouts   = $this->layouts;
+
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
-        $validator = new \ProExtended\Elements\HierarchyValidator($this->schema);
+        $sharedValidator = null;
+        $validator = static function () use (&$sharedValidator, $schema, $gateway): HierarchyValidator {
+            return $sharedValidator ??= new HierarchyValidator($schema, $gateway);
+        };
 
-        // Read tools.
-        $this->registerTool(new Tools\ListElements($this->schema));
-        $this->registerTool(new Tools\GetElementSchema($this->schema));
-        $this->registerTool(new Tools\ListLayouts($this->layouts));
-        $this->registerTool(new Tools\GetLayout($this->layouts));
-        $this->registerTool(new Tools\ValidateLayout($validator));
-        $this->registerTool(new Tools\ListColors());
-        $this->registerTool(new Tools\ListFonts());
-        $this->registerTool(new Tools\GetSiteInfo());
+        $factories = [
+            // Read tools.
+            'list_elements'         => static fn() => new Tools\ListElements($schema),
+            'get_element_schema'    => static fn() => new Tools\GetElementSchema($schema),
+            'list_layouts'          => static fn() => new Tools\ListLayouts($layouts),
+            'get_layout'            => static fn() => new Tools\GetLayout($layouts),
+            'validate_layout'       => static fn() => new Tools\ValidateLayout($validator()),
+            'list_colors'           => static fn() => new Tools\ListColors(),
+            'list_fonts'            => static fn() => new Tools\ListFonts(),
+            'get_site_info'         => fn() => new Tools\GetSiteInfo(new Health($gateway, $hostCache, $this)),
 
-        // Write tools.
-        $this->registerTool(new Tools\CreatePage($this->layouts));
-        $this->registerTool(new Tools\DeployLayout($this->layouts, $validator));
-        $this->registerTool(new Tools\BackupLayout($this->layouts));
-        $this->registerTool(new Tools\RestoreLayout($this->layouts));
-        $this->registerTool(new Tools\ClearCache());
-        $this->registerTool(new Tools\UpdateLayout($this->layouts, $validator));
+            // Write tools.
+            'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator()),
+            'deploy_layout'         => static fn() => new Tools\DeployLayout($layouts, $validator()),
+            'backup_layout'         => static fn() => new Tools\BackupLayout($layouts),
+            'restore_layout'        => static fn() => new Tools\RestoreLayout($layouts),
+            'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache),
+            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator()),
 
-        // Resources.
-        $this->registerResource(new Resources\ElementSchemaResource($this->schema));
-        $this->registerResource(new Resources\HierarchyResource($this->schema));
-        $this->registerResource(new Resources\ColorPaletteResource());
+            // Site foundations (1.1.0).
+            'create_document'          => static fn() => new Tools\CreateDocument($layouts, $validator()),
+            'update_document_settings' => static fn() => new Tools\UpdateDocumentSettings($layouts),
+            'list_components'          => static fn() => new Tools\ListComponents($gateway),
+            'get_global_css'           => static fn() => new Tools\GetGlobalCss($gateway),
+            'set_global_css'           => static fn() => new Tools\SetGlobalCss($gateway, $backups),
+            'set_colors'               => static fn() => new Tools\SetColors($gateway, $backups),
+            'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups),
+            'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
+            'list_menus'               => static fn() => new Tools\ListMenus(),
+            'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
+            'restore_settings'         => static fn() => new Tools\RestoreSettings($backups),
+        ];
+
+        foreach ($factories as $name => $factory) {
+            try {
+                $this->registerTool($factory());
+            } catch (\Throwable $e) {
+                $this->registrationErrors[$name] = $e->getMessage();
+                error_log(sprintf('[Pro Extended] MCP tool "%s" was not registered: %s', $name, $e->getMessage()));
+            }
+        }
+
+        $resources = [
+            'pe://schema/elements'  => static fn() => new Resources\ElementSchemaResource($schema),
+            'pe://schema/hierarchy' => static fn() => new Resources\HierarchyResource($schema),
+            'pe://colors/palette'   => static fn() => new Resources\ColorPaletteResource(),
+        ];
+
+        foreach ($resources as $uri => $factory) {
+            try {
+                $this->registerResource($factory());
+            } catch (\Throwable $e) {
+                $this->registrationErrors[$uri] = $e->getMessage();
+                error_log(sprintf('[Pro Extended] MCP resource "%s" was not registered: %s', $uri, $e->getMessage()));
+            }
+        }
+
+        /**
+         * Fires after the built-in tools are registered, so extensions can add
+         * their own with $server->registerTool().
+         */
+        do_action('pe_mcp_register_tools', $this);
     }
 
     // ─── Response Builders ───────────────────────────────────────────────────
@@ -324,6 +461,33 @@ final class Server
             'id'      => $id,
             'result'  => $result,
         ];
+    }
+
+    /**
+     * Build a tool result that reports a failure (`isError: true`).
+     *
+     * @param  mixed $id
+     * @return array<string, mixed>
+     */
+    private function toolError(mixed $id, string $toolName, \Throwable $e): array
+    {
+        if ($e instanceof \Error) {
+            // A PHP error is a bug rather than bad input; keep it in the log.
+            error_log(sprintf('[Pro Extended] %s in tool "%s": %s', get_class($e), $toolName, $e->getMessage()));
+            $message = sprintf('Internal error in %s: %s', $toolName, $e->getMessage());
+        } else {
+            $message = $e->getMessage();
+        }
+
+        return $this->success($id, [
+            'content' => [
+                [
+                    'type' => 'text',
+                    'text' => $message !== '' ? $message : 'The tool failed without a message.',
+                ],
+            ],
+            'isError' => true,
+        ]);
     }
 
     /**
