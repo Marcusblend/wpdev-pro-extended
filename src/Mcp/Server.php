@@ -10,6 +10,7 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Cornerstone\Permissions;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Site\PlatformSnapshot;
+use ProExtended\Site\WriteJournal;
 use ProExtended\Templates\TemplateGateway;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\Resources\ResourceInterface;
@@ -292,6 +293,12 @@ TXT;
 
             $result = $tool->execute($arguments);
 
+            // Record what changed, so a site can be asked later. A tool that
+            // only reads is skipped, and the journal never fails a write.
+            if ($tool instanceof AnnotatedToolInterface && empty($tool->annotations()['readOnlyHint'])) {
+                (new WriteJournal())->record($toolName, $arguments, $result);
+            }
+
             return $this->success($id, [
                 'content' => [
                     [
@@ -412,6 +419,8 @@ TXT;
             'export_tco'            => static fn() => new Tools\ExportTco($templates),
             'get_platform_baseline' => static fn() => new Tools\GetPlatformBaseline(new PlatformSnapshot($schema, $gateway, $elements)),
             'list_prefabs'          => static fn() => new Tools\ListPrefabs(new \ProExtended\Cornerstone\Prefabs()),
+            'list_dynamic_content'  => static fn() => new Tools\ListDynamicContent(new \ProExtended\Cornerstone\DynamicContentCatalog()),
+            'get_write_journal'     => static fn() => new Tools\GetWriteJournal(new WriteJournal()),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),

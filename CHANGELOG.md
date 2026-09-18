@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`list_dynamic_content`**: the Dynamic Content tokens this site has — every group and field, the token each writes (`{{dc:post:title}}`) and the named arguments a field takes, with an example. Which groups exist depends on what is installed, and a token for a field the site lacks renders as nothing rather than erroring, so the catalog is worth having before writing one
+- **`get_write_journal`**: what the plugin has changed on this site, newest first — tool, user, time, what it touched and a short summary. Every write is recorded, dry runs included and filterable, where the settings backups only cover the few things they hold
+
 ## [1.3.0] - 2026-09-18
 
 "Site Systems": Pro Extended can now write the parts of a site a build actually starts with — menus and Pro headers, the template library, Theme Options, global variables and parameters, page-level layout overrides and components — and, following the Inspector, it can author elements through their own settings rather than a block of CSS. Existing tools keep their names, required inputs and result shapes, with one documented exception: `get_element_schema` returns the control surface by default and its previous output under `format: "raw"`.
