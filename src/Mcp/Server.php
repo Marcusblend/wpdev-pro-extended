@@ -7,6 +7,7 @@ namespace ProExtended\Mcp;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
+use ProExtended\Cornerstone\Permissions;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Site\PlatformSnapshot;
 use ProExtended\Templates\TemplateGateway;
@@ -271,6 +272,13 @@ TXT;
                 $toolName,
                 $tool->requiredCapability()
             ));
+        }
+
+        // Then Cornerstone's own, which a site can take away separately.
+        $denial = (new Permissions())->denialFor($toolName);
+
+        if ($denial !== null) {
+            return $this->error($id, self::ERR_INVALID_REQ, $denial);
         }
 
         try {
