@@ -8,6 +8,7 @@ use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Elements\SchemaExtractor;
+use ProExtended\Site\PlatformSnapshot;
 use ProExtended\Templates\TemplateGateway;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\Resources\ResourceInterface;
@@ -401,6 +402,7 @@ TXT;
             'list_templates'        => static fn() => new Tools\ListTemplates($templates),
             'get_template'          => static fn() => new Tools\GetTemplate($templates),
             'export_tco'            => static fn() => new Tools\ExportTco($templates),
+            'get_platform_baseline' => static fn() => new Tools\GetPlatformBaseline(new PlatformSnapshot($schema, $gateway, $elements)),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
@@ -425,6 +427,7 @@ TXT;
             'set_global_parameters'    => static fn() => new Tools\SetGlobalParameters($gateway, $backups, $elements),
             'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
+            'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
             'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),

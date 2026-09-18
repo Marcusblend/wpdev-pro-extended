@@ -77,12 +77,20 @@ final class TemplateGateway
 
         $rows = [];
 
-        foreach (get_posts($args) as $post) {
+        foreach (get_posts(\ProExtended\Site\Languages::allLanguages($args)) as $post) {
             $row = $this->summarize($post);
 
-            if ($row !== null) {
-                $rows[] = $row;
+            if ($row === null) {
+                continue;
             }
+
+            $language = \ProExtended\Site\Languages::forPost((int) $post->ID, $post->post_type);
+
+            if ($language !== null) {
+                $row += $language;
+            }
+
+            $rows[] = $row;
         }
 
         return $rows;
