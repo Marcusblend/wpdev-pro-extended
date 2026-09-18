@@ -14,6 +14,16 @@ final class SchemaExtractor
     private const CACHE_KEY = 'pe_element_definitions';
     private const CACHE_TTL = HOUR_IN_SECONDS;
 
+    /** One transient per element type, plus an index so they can all be cleared. */
+    private const SURFACE_PREFIX = 'pe_element_surface_';
+    private const SURFACE_INDEX = 'pe_element_surface_index';
+
+    /** Cornerstone assembles Inspector data once per request; so do we. */
+    private static bool $builderContext = false;
+
+    /** @var array<string, mixed>|null */
+    private static ?array $inspector = null;
+
     /** Stand-in for values that cannot survive serialization. */
     private const UNSERIALIZABLE = '__unserializable_closure__';
 
@@ -192,10 +202,142 @@ final class SchemaExtractor
     }
 
     /**
+     * The settings an element type really has, grouped the way the builder's
+     * Inspector groups them.
+     *
+     * @return array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>}
+     */
+    public function getSurface(string $type): array
+    {
+        $key = self::SURFACE_PREFIX . md5($type);
+        $cached = get_transient($key);
+
+        if (is_array($cached)) {
+            return $cached;
+        }
+
+        $inspector = $this->inspectorData()[$type] ?? null;
+
+        if (! is_array($inspector)) {
+            return ['panels' => [], 'controls' => []];
+        }
+
+        $surface = ControlSurface::build($inspector, $this->getDesignations($type), $this->getDefaults($type));
+
+        $index = get_transient(self::SURFACE_INDEX);
+        $index = is_array($index) ? $index : [];
+
+        if (! in_array($key, $index, true)) {
+            $index[] = $key;
+            set_transient(self::SURFACE_INDEX, $index, self::CACHE_TTL);
+        }
+
+        set_transient($key, $surface, self::CACHE_TTL);
+
+        return $surface;
+    }
+
+    /**
+     * Which flat keys are style and which are markup, as the element declares.
+     *
+     * @return array<string, string>
+     */
+    public function getDesignations(string $type): array
+    {
+        if (! function_exists('cornerstone')) {
+            return [];
+        }
+
+        try {
+            $element = cornerstone('Elements')->get_element($type);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if (! is_object($element) || ! method_exists($element, 'get_designations')) {
+            return [];
+        }
+
+        $designations = $element->get_designations();
+
+        if (! is_array($designations)) {
+            return [];
+        }
+
+        $clean = [];
+
+        foreach ($designations as $key => $designation) {
+            if (is_string($key) && is_string($designation)) {
+                $clean[$key] = $designation;
+            }
+        }
+
+        return $clean;
+    }
+
+    /**
+     * Cornerstone's Inspector data for every element.
+     *
+     * The control definitions are assembled with cs_recall, which returns a
+     * fallback and raises a warning unless the request is a builder one. The
+     * builder marks itself by firing cs_before_late_data, so this fires it too
+     * — once per request, on this read path only, never while saving — and
+     * quiets the warnings that Cornerstone raises while it decides.
+     *
+     * @return array<string, mixed>
+     */
+    private function inspectorData(): array
+    {
+        if (self::$inspector !== null) {
+            return self::$inspector;
+        }
+
+        if (! function_exists('cornerstone')) {
+            return self::$inspector = [];
+        }
+
+        $elements = cornerstone('Elements');
+
+        if (! method_exists($elements, 'get_element_inspector_data')) {
+            return self::$inspector = [];
+        }
+
+        if (! self::$builderContext) {
+            self::$builderContext = true;
+            do_action('cs_before_late_data');
+        }
+
+        $previous = set_error_handler(static fn (): bool => true, E_USER_WARNING | E_WARNING);
+
+        try {
+            $data = $elements->get_element_inspector_data();
+        } catch (\Throwable) {
+            $data = [];
+        } finally {
+            restore_error_handler();
+            unset($previous);
+        }
+
+        return self::$inspector = is_array($data) ? $data : [];
+    }
+
+    /**
      * Clear the element definitions cache.
      */
     public function clearCache(): void
     {
         delete_transient(self::CACHE_KEY);
+
+        $index = get_transient(self::SURFACE_INDEX);
+
+        foreach (is_array($index) ? $index : [] as $key) {
+            if (is_string($key)) {
+                delete_transient($key);
+            }
+        }
+
+        delete_transient(self::SURFACE_INDEX);
+
+        self::$inspector = null;
     }
 }

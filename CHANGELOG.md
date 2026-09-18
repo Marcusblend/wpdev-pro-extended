@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`create_menu` and `update_menu`**: navigation menus with items, order, nesting, theme locations and the anchor graphic meta Cornerstone's navigation elements read. Operations run in order and can refer to items added earlier in the same call by `ref`; removal needs `force`, locations change only when named, and `dry_run` reports what would be written
+- **Header presets on `create_document`** (`preset`, `preset_options`): `header.simple`, `header.mega` and `mega_menu_panel` build bar to container to navigation, with a dropdown panel of link columns for a mega menu. Generated elements are stamped, so a collapsed navigation does not fall back to the legacy off-canvas behaviour
+- **`get_element_schema` control surface**: the settings an element type has, grouped as the builder's Inspector groups them — tab, panel, label, control type, accepted values, defaults, and the flat key or keys each control writes, including `named_keys` for controls that write several at once (`font_size` to `text_font_size`). `writes` says whether a setting changes style, markup or both. `search` narrows to matching controls. Cornerstone assembles this only in a builder context, so the plugin enters one on this read path, once per request, and caches the result
+- **`elements` in `clear_cache`**: drops the cached element definitions and control surfaces, which a Cornerstone update changes
+
+### Changed
+
+- **`get_element_schema` returns the control surface by default.** The previous output — Cornerstone's full definition and defaults — is still available with `format: "raw"`
+
 ## [1.2.0] - 2026-09-17
 
 "Builder Parity": Pro Extended now writes pages the way Cornerstone's builder does, gives new elements the markers the builder gives them, and warns about element data Cornerstone would render differently than intended. It also reports the site's Cornerstone feature switches, reads Theme Options, and removes palette and font entries safely. Existing tools keep their names, required inputs and result shapes (new optional inputs and additional result keys only).
