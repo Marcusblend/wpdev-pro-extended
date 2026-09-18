@@ -40,3 +40,25 @@ T::same(null, $summary[1]['version'], 'drops a URL found in a whitelisted field'
 T::ok(! str_contains($json, 'http') && ! str_contains($json, 'SECRET') && ! str_contains($json, 'package') && ! str_contains($json, 'example.invalid'), 'no URL, key or package field leaks', $json);
 T::same([], MaxPackages::summarize('', [], []), 'an empty option gives an empty list');
 T::same([], MaxPackages::summarize(null, [], []), 'a missing option gives an empty list');
+
+// Title fallback ------------------------------------------------------------
+
+$noTitles = MaxPackages::summarize([
+    ['slug' => 'cornerstone-data-tables', 'plugin' => 'cornerstone-data-tables/plugin.php', 'new_version' => '1.4.0'],
+    ['slug' => 'the_events_calendar', 'name' => 'The Events Calendar'],
+    ['slug' => 'cs-forms', 'x-extension' => ['title' => 'Cornerstone Forms']],
+    ['slug' => 'sitedrive', 'title' => 'https://example.com/package.zip'],
+    ['plugin' => 'nameless/nameless.php'],
+], [], []);
+
+$byPlugin = [];
+
+foreach ($noTitles as $row) {
+    $byPlugin[(string) $row['slug']] = $row;
+}
+
+T::same('Cornerstone Data Tables', $byPlugin['cornerstone-data-tables']['title'], 'a slug becomes a readable title when nothing else is stored');
+T::same('The Events Calendar', $byPlugin['the_events_calendar']['title'], 'a stored name wins over the slug');
+T::same('Cornerstone Forms', $byPlugin['cs-forms']['title'], 'a nested extension title is used');
+T::same('Sitedrive', $byPlugin['sitedrive']['title'], 'a URL is never used as a title');
+T::same(null, $byPlugin['']['title'], 'an entry with no slug and no name has no title');

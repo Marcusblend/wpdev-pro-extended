@@ -12,12 +12,13 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutOutline;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\ToolPermissionException;
+use ProExtended\Recipes\HeaderRecipes;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 
 final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 {
-    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'if_not_exists', 'dry_run', 'stamp_new'];
+    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'preset', 'preset_options', 'if_not_exists', 'dry_run', 'stamp_new'];
 
     private readonly DocumentGateway $gateway;
 
@@ -66,6 +67,15 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                     'type'        => ['object', 'array'],
                     'description' => 'Optional. The document data, in the shape get_layout returns in "data".',
                 ],
+                'preset' => [
+                    'type'        => 'string',
+                    'enum'        => HeaderRecipes::NAMES,
+                    'description' => 'Optional. Build layout_data from a recipe instead of passing it: "header.simple" (bar, container, logo, inline and collapsed navigation), "header.mega" (the same plus a mega menu panel) or "mega_menu_panel" (the dropdown subtree on its own, to insert with update_layout).',
+                ],
+                'preset_options' => [
+                    'type'        => 'object',
+                    'description' => 'Optional. Recipe options: menu (term ID, "menu:<id>" or "location:<slug>"), logo (attachment reference), logo_alt, collapsed (default true), trigger (mega menu label) and columns ([{heading, links: [{label, href}]}]).',
+                ],
                 'if_not_exists' => [
                     'type'        => 'boolean',
                     'description' => 'Optional. Return an existing document with the same type and exact title instead of creating one. Default: true.',
@@ -84,7 +94,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 
     public function execute(array $arguments): mixed
     {
-        $arguments = JsonArgs::decode($arguments, ['settings', 'layout_data']);
+        $arguments = JsonArgs::decode($arguments, ['settings', 'layout_data', 'preset_options']);
         Args::rejectUnknown($arguments, self::ARGUMENTS, 'arguments');
 
         $type = Args::enum($arguments, 'type', $this->gateway->availableTypes(), null);
@@ -117,7 +127,28 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
         $warnings = [];
 
         $settings = DocumentSettings::validate($docType, Args::object($arguments, 'settings') ?? []);
-        [$elements, $dataSettings] = $this->readLayoutData($docType, Args::object($arguments, 'layout_data'), $warnings);
+        $layoutData = Args::object($arguments, 'layout_data');
+        $preset = Args::string($arguments, 'preset', null, 64, false);
+
+        if ($preset !== null) {
+            if ($layoutData !== null) {
+                throw new \InvalidArgumentException('Pass preset or layout_data, not both.');
+            }
+
+            $built = HeaderRecipes::build($preset, Args::object($arguments, 'preset_options') ?? []);
+
+            foreach ($built['warnings'] as $warning) {
+                $warnings[] = $warning;
+            }
+
+            $layoutData = $built['data'];
+
+            if (! isset($layoutData['regions'])) {
+                throw new \InvalidArgumentException(sprintf('The "%s" preset builds a subtree, not a document. Create the header first, then insert it with update_layout.', $preset));
+            }
+        }
+
+        [$elements, $dataSettings] = $this->readLayoutData($docType, $layoutData, $warnings);
         $settings = array_merge($dataSettings, $settings);
 
         if (DocumentSettings::hasCode($settings) && ! current_user_can('unfiltered_html')) {

@@ -84,3 +84,49 @@ T::ok($errors !== [], 'rejects config keys outside the allowlist');
 $errors = [];
 $same = FontItems::mergeConfig($stored, ['typekitKitID' => 'abc'], $errors);
 T::same([], $same['changed'], 'an identical value is not a change');
+
+// Editing a Google font while Google Fonts are off --------------------------
+
+// With googleDisabled, Cornerstone drops Google families from its font list,
+// so a catalog lookup for a stored font finds nothing.
+$offCatalog = ['arial' => ['source' => 'system', 'family' => 'Arial', 'stack' => 'Arial,sans-serif', 'weights' => ['400', '700']]];
+$stored = ['_id' => 'exp03Base', 'title' => 'Base', 'family' => 'Jost', 'source' => 'google', 'name' => 'jost', 'stack' => '"Jost",sans-serif'];
+
+$errors = [];
+$renamed = FontItems::complete(
+    ['_id' => 'exp03Base', 'title' => 'Base Copy', 'family' => 'Jost', 'source' => 'google'],
+    ['googleDisabled' => true],
+    $offCatalog,
+    false,
+    $errors,
+    $stored
+);
+
+T::same([], $errors, 'a title-only change to a stored Google font is allowed while Google Fonts are off');
+T::same('jost', $renamed['name'], 'and keeps the stored name');
+T::same('"Jost",sans-serif', $renamed['stack'], 'and the stored stack');
+
+$errors = [];
+FontItems::complete(
+    ['_id' => 'exp03Base', 'title' => 'Base', 'family' => 'Inter', 'source' => 'google'],
+    ['googleDisabled' => true],
+    $offCatalog,
+    false,
+    $errors,
+    $stored
+);
+
+T::same(1, count($errors), 'changing the family is still checked against the font list');
+T::ok(str_contains($errors[0], 'Google Fonts are disabled'), 'and the refusal says why the family was not found');
+
+$errors = [];
+FontItems::complete(
+    ['_id' => 'peNew', 'title' => 'New', 'family' => 'Jost', 'source' => 'google'],
+    ['googleDisabled' => true],
+    $offCatalog,
+    true,
+    $errors,
+    null
+);
+
+T::same(1, count($errors), 'a new Google font is still checked');

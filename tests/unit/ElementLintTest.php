@@ -109,6 +109,42 @@ T::same(['nested-link'], $codesOf($issues), 'nested-link: a link inside a link')
 T::same('0._modules.0', $issues[0]['path'] ?? null, 'nested-link points at the inner element');
 $seen['nested-link'] = true;
 
+
+// css-over-control needs a site that can say which settings an element has.
+
+$withSurface = new ElementLint(new LintContext(
+    ['text' => 1],
+    '4_4',
+    [],
+    [],
+    null,
+    null,
+    static fn (string $type): array => $type === 'headline'
+        ? ['font-size' => 'text_font_size', 'color' => 'text_text_color']
+        : [],
+));
+
+$styled = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'css' => '$el { font-size: 2em; color: red; }'];
+$issues = $withSurface->tree([$styled]);
+T::same(['css-over-control'], $codesOf($issues), 'css-over-control: a declaration the element has a setting for');
+T::same(2, count($issues), 'one issue per property');
+T::ok(str_contains($issues[0]['message'], 'text_font_size'), 'the message names the key to set instead');
+$seen['css-over-control'] = true;
+
+$unmatched = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'css' => '$el { backdrop-filter: blur(4px); }'];
+T::same([], $codesOf($withSurface->tree([$unmatched])), 'a property with no setting is left alone');
+
+$noSurface = ['_type' => 'section', '_m' => ['e' => 2], '_bp_base' => '4_4', 'css' => '$el { font-size: 2em; }'];
+T::same([], $codesOf($withSurface->tree([$noSurface])), 'an element type the registry knows nothing about is left alone');
+
+$selector = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'css' => '$el .color { background: url(a.png); }'];
+T::same([], $codesOf($withSurface->tree([$selector])), 'a selector that reads like a property is not a declaration');
+
+$blank = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'css' => '   '];
+T::same([], $codesOf($withSurface->tree([$blank])), 'empty css is not reported');
+
+T::same([], $codesOf($lint->tree([$styled])), 'without a registry the check stays quiet');
+
 T::same([], array_values(array_diff(array_keys(ElementLint::CODES), array_keys($seen))), 'every code has a fixture');
 
 // Things that must not warn.

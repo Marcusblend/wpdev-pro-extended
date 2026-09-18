@@ -437,6 +437,10 @@ Header, footer, layout and component writes go through Cornerstone's Document AP
 - Writes through Cornerstone's Document API, so its caches stay correct
 - Tool annotations, `isError` results, dry runs, `wp pe doctor`
 
+### ✅ v1.3.0 — Site Systems
+
+Menus and Pro headers (with mega menus), the template library and `.tco`, Theme Options writes, Global Variables and global parameters, page-level layout overrides, components and prefabs, WPML awareness, Cornerstone permission parity, extension reporting and a platform drift baseline. Elements can be authored through their own Inspector settings — with presets, parameters and variables — rather than a block of CSS.
+
 ### ✅ v1.2.0 — Builder Parity
 - Page writes through Cornerstone's `Document::save()` (override flag, save hooks, storage mode)
 - `_m` and `_bp_base` markers on new elements (`stamp_new`)

@@ -174,7 +174,7 @@ foreach ((array) ($list['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 26, 'lists 26 tools', (string) count($tools));
+S::check(count($tools) === 40, 'lists 40 tools', (string) count($tools));
 S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 12 newer tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 S::check(($tools['upload_media']['annotations']['openWorldHint'] ?? null) === true, 'upload_media is open-world');
@@ -202,7 +202,7 @@ foreach ($baseline as $name => [$properties, $required]) {
 $init = S::rpc('initialize', ['protocolVersion' => '2025-03-26', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pe-smoke', 'version' => '1']]);
 S::check(($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'protocol version unchanged');
 S::check(str_contains((string) ($init['result']['instructions'] ?? ''), 'global-color:'), 'initialize returns instructions');
-S::check(($init['result']['serverInfo']['version'] ?? null) === '1.2.0', 'server reports 1.2.0');
+S::check(($init['result']['serverInfo']['version'] ?? null) === '1.3.0', 'server reports 1.3.0');
 S::check($server->getRegistrationErrors() === [], 'no tool failed to register', wp_json_encode($server->getRegistrationErrors()));
 
 // 18. Storage detection --------------------------------------------------------
@@ -694,7 +694,13 @@ if ($renameId > 0) {
 }
 
 if ($lockPageId > 0) {
-    S::isError(S::call('update_document_settings', ['document_id' => $lockPageId, 'settings' => ['assignment_priority' => 1]]), 'a page is not a document', 'not a Cornerstone');
+    // A page takes its own settings now, and only those: assignments and
+    // priorities belong to the documents a page points at, not to the page.
+    S::isError(S::call('update_document_settings', ['document_id' => $lockPageId, 'settings' => ['assignment_priority' => 1]]), 'a document-only setting is rejected on a page', 'Unknown setting "assignment_priority"');
+    S::isError(S::call('update_document_settings', ['document_id' => $lockPageId, 'settings' => ['layoutHeader' => '999999']]), 'a layout override must point at a real document', 'does not exist');
+
+    $pageSettings = S::ok(S::call('update_document_settings', ['document_id' => $lockPageId, 'settings' => ['layoutSingle' => 'default'], 'dry_run' => true]), 'a page accepts its own settings');
+    S::check(($pageSettings['doc_type'] ?? null) === 'content:page', 'a page reports its content doc type', json_encode($pageSettings['doc_type'] ?? null));
 }
 
 if (isset($jsonFooter['document_id'])) {
@@ -1292,7 +1298,7 @@ foreach ((array) ($menus['menus'] ?? []) as $menu) {
 
 $info = S::ok(S::call('get_site_info'), 'get_site_info');
 $health = (array) ($info['health'] ?? []);
-S::check(($info['pro_extended']['version'] ?? null) === '1.2.0', 'get_site_info reports 1.2.0');
+S::check(($info['pro_extended']['version'] ?? null) === '1.3.0', 'get_site_info reports 1.3.0');
 
 foreach (['cornerstone_available', 'permalinks', 'application_passwords_in_use', 'blog_public', 'breakpoint_ranges_saved', 'current_user', 'global_css_key', 'cornerstone_adapter', 'component_registry', 'host_cache', 'settings', 'environment_type'] as $key) {
     S::check(array_key_exists($key, $health), "the health block has {$key}");

@@ -974,6 +974,88 @@ final class DocumentGateway
     }
 
     /**
+     * Merge settings into a page's stored Cornerstone settings.
+     *
+     * A page keeps its settings in `_cornerstone_settings` beside its elements,
+     * not in post_content like a header or layout, so this goes through
+     * Content::updateElements() with the elements unchanged — the same call the
+     * builder makes when only the settings panel changed — and writes the meta
+     * directly if that is unavailable.
+     *
+     * @param  array<string, mixed> $settings
+     * @return array{path: string, before: array<string, mixed>, after: array<string, mixed>}
+     */
+    public function updatePageSettings(int $id, array $settings): array
+    {
+        $post = get_post($id);
+
+        if (! $post instanceof \WP_Post) {
+            throw new \InvalidArgumentException(sprintf('Post %d does not exist.', $id));
+        }
+
+        $before = $this->readPageSettings($id);
+        $after = array_merge($before, $settings);
+
+        // Cornerstone writes page settings as serialized meta and then rebuilds
+        // post_content with them, which is what Content::save() does around its
+        // own updateElements() call. Doing only the first would leave the
+        // rendered page carrying the old settings until the next save.
+        if (function_exists('cs_update_serialized_post_meta')) {
+            cs_update_serialized_post_meta($id, '_cornerstone_settings', $after, '', false, 'cs_content_update_serialized_content');
+        } else {
+            update_post_meta($id, '_cornerstone_settings', wp_slash((string) wp_json_encode($after)));
+        }
+
+        $path = self::PATH_FALLBACK;
+        $elements = Json::decodeStored(get_post_meta($id, '_cornerstone_data', true));
+
+        if ($elements !== null && ! $this->fallbackForced()) {
+            $previousPost = $GLOBALS['post'] ?? null;
+            $this->clearResolverCache($id);
+
+            try {
+                $class = '\\' . self::DOCUMENT_CLASS;
+                $doc = $class::locate($id);
+
+                if (is_a($doc, self::CONTENT_CLASS) && method_exists($doc, 'updateElements')
+                    && $doc->updateElements($elements, $after) === true) {
+                    $path = self::PATH_API;
+                }
+            } catch (\Throwable) {
+                // The meta is written either way; the rendered content catches
+                // up on the next save.
+            } finally {
+                $GLOBALS['post'] = $previousPost;
+                $this->clearResolverCache($id);
+            }
+        }
+
+        $this->firePageSaved($id);
+
+        return ['path' => $path, 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * A page's stored Cornerstone settings.
+     *
+     * @return array<string, mixed>
+     */
+    public function readPageSettings(int $id): array
+    {
+        if (function_exists('cs_get_serialized_post_meta')) {
+            $stored = cs_get_serialized_post_meta($id, '_cornerstone_settings', true);
+
+            if (is_array($stored)) {
+                return $stored;
+            }
+        }
+
+        $stored = Json::decodeStored(get_post_meta($id, '_cornerstone_settings', true));
+
+        return is_array($stored) ? $stored : [];
+    }
+
+    /**
      * After a page's Cornerstone data is written: fire `cs_save_document` the
      * way the builder does (its listeners refresh the `cs_last_save` option,
      * the Google Fonts request cache and the document's asset meta, which is

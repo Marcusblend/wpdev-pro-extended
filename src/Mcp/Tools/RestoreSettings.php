@@ -35,8 +35,7 @@ final class RestoreSettings implements ToolInterface, AnnotatedToolInterface
             'properties' => [
                 'key' => [
                     'type'        => 'string',
-                    'enum'        => SettingsBackups::KEYS,
-                    'description' => 'Which settings to restore.',
+                    'description' => 'Which settings to restore: colors, fonts, font_config, global_css, or "option:<theme option name>" for one Theme Option written by update_theme_options.',
                 ],
                 'backup_id' => [
                     'type'        => 'string',
@@ -54,7 +53,11 @@ final class RestoreSettings implements ToolInterface, AnnotatedToolInterface
     {
         Args::rejectUnknown($arguments, self::ARGUMENTS, 'arguments');
 
-        $key = Args::enum($arguments, 'key', SettingsBackups::KEYS, null);
+        $key = Args::string($arguments, 'key', null, 200);
+
+        if ($key !== null && ! in_array($key, SettingsBackups::KEYS, true) && ! str_starts_with($key, SettingsBackups::OPTION_KEY_PREFIX)) {
+            throw new \InvalidArgumentException(sprintf('key must be one of %s, or "%s<theme option name>" for a theme option.', implode(', ', SettingsBackups::KEYS), SettingsBackups::OPTION_KEY_PREFIX));
+        }
 
         if ($key === null) {
             throw new \InvalidArgumentException('"key" is required.');

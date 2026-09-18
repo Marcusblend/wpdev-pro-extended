@@ -50,6 +50,8 @@ final class MaxPackages
                 $row[$out] = is_scalar($value) && ! self::looksLikeUrl((string) $value) ? (string) $value : null;
             }
 
+            $row['title'] ??= self::title($entry, $row['slug']);
+
             $plugin = $row['plugin'];
             $row['purchased'] = ! empty($entry['purchased']);
             $row['installed'] = $plugin !== null && in_array($plugin, $installed, true);
@@ -61,6 +63,36 @@ final class MaxPackages
         usort($packages, static fn(array $a, array $b): int => strcmp((string) $a['slug'], (string) $b['slug']));
 
         return $packages;
+    }
+
+    /**
+     * A readable name for a package.
+     *
+     * Cornerstone stores no title on most x_max_plugins entries, so every Max
+     * product printed as a blank name. Fall back to a name the entry does
+     * carry, then to the slug read as words.
+     *
+     * @param array<string, mixed> $entry
+     */
+    private static function title(array $entry, ?string $slug): ?string
+    {
+        $candidates = [
+            $entry['name'] ?? null,
+            $entry['Name'] ?? null,
+            is_array($entry['x-extension'] ?? null) ? ($entry['x-extension']['title'] ?? $entry['x-extension']['name'] ?? null) : null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '' && ! self::looksLikeUrl($candidate)) {
+                return trim($candidate);
+            }
+        }
+
+        if ($slug === null || $slug === '') {
+            return null;
+        }
+
+        return ucwords(str_replace(['-', '_'], ' ', $slug));
     }
 
     private static function looksLikeUrl(string $value): bool

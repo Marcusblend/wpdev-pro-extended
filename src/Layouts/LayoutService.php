@@ -7,6 +7,7 @@ namespace ProExtended\Layouts;
 use ProExtended\Cornerstone\ComponentScanner;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Elements\ElementTree;
+use ProExtended\Site\Languages;
 use ProExtended\Support\Json;
 
 /**
@@ -374,13 +375,13 @@ final class LayoutService
         ));
 
         if (! empty($layoutTypes)) {
-            $posts = get_posts([
+            $posts = get_posts(Languages::allLanguages([
                 'post_type'      => $layoutTypes,
                 'post_status'    => $this->listableStatuses(),
                 'posts_per_page' => -1,
                 'orderby'        => 'title',
                 'order'          => 'ASC',
-            ]);
+            ]));
 
             foreach ($posts as $post) {
                 $row = [
@@ -396,6 +397,12 @@ final class LayoutService
                     $row += $this->componentDocumentInfo($post);
                 }
 
+                $language = Languages::forPost((int) $post->ID, $post->post_type);
+
+                if ($language !== null) {
+                    $row += $language;
+                }
+
                 $results[] = $row;
             }
         }
@@ -404,7 +411,7 @@ final class LayoutService
         $contentTypes = array_intersect($types, ['page', 'post']);
 
         if (! empty($contentTypes)) {
-            $posts = get_posts([
+            $posts = get_posts(Languages::allLanguages([
                 'post_type'      => $contentTypes,
                 'post_status'    => $this->listableStatuses(),
                 'posts_per_page' => -1,
@@ -412,10 +419,10 @@ final class LayoutService
                 'meta_compare'   => 'EXISTS',
                 'orderby'        => 'title',
                 'order'          => 'ASC',
-            ]);
+            ]));
 
             foreach ($posts as $post) {
-                $results[] = [
+                $row = [
                     'id'       => $post->ID,
                     'title'    => $post->post_title,
                     'type'     => $post->post_type,
@@ -423,6 +430,14 @@ final class LayoutService
                     'modified' => $post->post_modified_gmt,
                     'doc_type' => 'content:' . $post->post_type,
                 ];
+
+                $language = Languages::forPost((int) $post->ID, $post->post_type);
+
+                if ($language !== null) {
+                    $row += $language;
+                }
+
+                $results[] = $row;
             }
         }
 

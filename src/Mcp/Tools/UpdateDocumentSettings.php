@@ -78,8 +78,10 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
 
         $docType = $this->gateway->docTypeForPost($post);
 
-        if ($docType === null || $this->layouts->detectSource($post) !== 'post_content' || str_starts_with($docType, 'content:')) {
-            throw new \InvalidArgumentException(sprintf('Post %d is not a Cornerstone header, footer, layout or component document.', $id));
+        $isContent = $docType !== null && str_starts_with($docType, 'content:');
+
+        if ($docType === null || (! $isContent && $this->layouts->detectSource($post) !== 'post_content')) {
+            throw new \InvalidArgumentException(sprintf('Post %d is not a Cornerstone document or page.', $id));
         }
 
         if ($this->gateway->isLegacyGlobalBlock($post)) {
@@ -112,6 +114,38 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
             }
         }
 
+        // A layout override points at another document; check it is there and
+        // is the right kind, or the page silently falls back to the default.
+        foreach (DocumentSettings::LAYOUT_OVERRIDES as $key => $expected) {
+            if (! isset($settings[$key])) {
+                continue;
+            }
+
+            $override = DocumentSettings::readOverride($settings[$key]);
+
+            if ($override['mode'] !== 'document') {
+                continue;
+            }
+
+            $target = get_post($override['id']);
+
+            if (! $target instanceof \WP_Post) {
+                throw new \InvalidArgumentException(sprintf('"%s" points at post %d, which does not exist.', $key, $override['id']));
+            }
+
+            $targetType = $this->gateway->docTypeForPost($target);
+
+            if ($targetType !== $expected) {
+                throw new \InvalidArgumentException(sprintf(
+                    '"%s" must point at a %s document; post %d is %s.',
+                    $key,
+                    $expected,
+                    $override['id'],
+                    $targetType === null ? 'not a Cornerstone document' : $targetType
+                ));
+            }
+        }
+
         if ($settings === [] && $title === null && $slug === null) {
             throw new \InvalidArgumentException('Nothing to change: pass settings, title or slug.');
         }
@@ -120,8 +154,14 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
             throw new ToolPermissionException('Setting customCSS or customJS requires the unfiltered_html capability.');
         }
 
-        $stored = Json::decodeStored($post->post_content) ?? [];
-        $current = is_array($stored['settings'] ?? null) ? $stored['settings'] : [];
+        if ($isContent) {
+            // A page keeps its settings in meta beside its elements.
+            $current = $this->gateway->readPageSettings($id);
+        } else {
+            $stored = Json::decodeStored($post->post_content) ?? [];
+            $current = is_array($stored['settings'] ?? null) ? $stored['settings'] : [];
+        }
+
         $defaults = $this->gateway->storedDefaults($docType);
         $changes = [];
 
@@ -165,6 +205,20 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
             'post_name'   => $post->post_name,
             'source_tool' => 'update_document_settings',
         ]);
+
+        if ($isContent) {
+            if ($title !== null) {
+                wp_update_post(['ID' => $id, 'post_title' => $title]);
+            }
+
+            $written = $settings === [] ? null : $this->gateway->updatePageSettings($id, $settings);
+
+            $result['updated'] = true;
+            $result['write_path'] = $written['path'] ?? 'post-meta';
+            $result['backup_id'] = $backupId;
+
+            return $result;
+        }
 
         $update = [];
 

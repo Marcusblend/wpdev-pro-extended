@@ -26,5 +26,6 @@ final class LintContext
         public readonly array $features = [],
         public readonly ?\Closure $conditionExists = null,
         public readonly ?\Closure $looperExists = null,
+        public readonly ?\Closure $cssProperties = null,
     ) {}
 }

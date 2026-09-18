@@ -5,20 +5,23 @@ declare(strict_types=1);
 namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Site\HostCache;
 use ProExtended\Support\Args;
 
 final class ClearCache implements ToolInterface, AnnotatedToolInterface
 {
-    private const INCLUDES = ['tss', 'generated_styles', 'components', 'assignments', 'host'];
+    private const INCLUDES = ['tss', 'generated_styles', 'components', 'assignments', 'elements', 'host'];
 
     private readonly DocumentGateway $gateway;
     private readonly HostCache $hostCache;
+    private readonly SchemaExtractor $schema;
 
-    public function __construct(?DocumentGateway $gateway = null, ?HostCache $hostCache = null)
+    public function __construct(?DocumentGateway $gateway = null, ?HostCache $hostCache = null, ?SchemaExtractor $schema = null)
     {
         $this->gateway = $gateway ?? new DocumentGateway();
         $this->hostCache = $hostCache ?? new HostCache();
+        $this->schema = $schema ?? new SchemaExtractor();
     }
 
     public function name(): string
@@ -99,6 +102,13 @@ final class ClearCache implements ToolInterface, AnnotatedToolInterface
 
                 case 'assignments':
                     $ran[] = sprintf('assignments (%s)', $this->gateway->clearAssignments()['path']);
+                    break;
+
+                case 'elements':
+                    // Element definitions and the Inspector control surface are
+                    // cached for an hour; a Cornerstone update changes both.
+                    $this->schema->clearCache();
+                    $ran[] = 'elements: definitions and control surfaces';
                     break;
 
                 case 'host':

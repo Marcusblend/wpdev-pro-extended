@@ -82,10 +82,7 @@ final class Features
             ],
             'external_api'    => self::externalApi(),
             'csv'             => ['enabled' => self::csvEnabled()],
-            'wpml'            => [
-                'active'  => class_exists('SitePress'),
-                'version' => defined('ICL_SITEPRESS_VERSION') ? (string) constant('ICL_SITEPRESS_VERSION') : null,
-            ],
+            'wpml'            => Languages::report(),
             'woocommerce'     => [
                 'active'  => self::woocommerceActive(),
                 'version' => defined('WC_VERSION') ? (string) constant('WC_VERSION') : null,

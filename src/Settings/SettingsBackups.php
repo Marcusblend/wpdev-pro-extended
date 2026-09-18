@@ -20,6 +20,9 @@ final class SettingsBackups
 
     public const KEYS = ['colors', 'fonts', 'font_config', 'global_css'];
 
+    /** Prefix that marks a backup key as a plain theme option. */
+    public const OPTION_KEY_PREFIX = 'option:';
+
     private const INDEX_OPTION = 'pe_settings_backups';
     private const ENTRY_PREFIX = 'pe_settings_backup_';
 
@@ -39,12 +42,33 @@ final class SettingsBackups
             'fonts'       => 'cornerstone_font_items',
             'font_config' => 'cornerstone_font_config',
             'global_css'  => $this->gateway->globalCssKey(),
-            default       => throw new \InvalidArgumentException(sprintf(
-                'Unknown settings key "%s". Allowed: %s.',
-                $key,
-                implode(', ', self::KEYS)
-            )),
+            default       => self::themeOptionFor($key),
         };
+    }
+
+    /**
+     * Theme option keys are backed up under their own name, prefixed so they
+     * cannot be confused with the four named settings above.
+     *
+     * update_theme_options writes one key at a time and backs each up first, so
+     * restore_settings can put a single option back without touching the rest.
+     */
+    private static function themeOptionFor(string $key): string
+    {
+        if (str_starts_with($key, self::OPTION_KEY_PREFIX)) {
+            $option = substr($key, strlen(self::OPTION_KEY_PREFIX));
+
+            if ($option !== '' && preg_match('/^[A-Za-z0-9_\-]+$/', $option) === 1) {
+                return $option;
+            }
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            'Unknown settings key "%s". Allowed: %s, or "%s<theme option name>".',
+            $key,
+            implode(', ', self::KEYS),
+            self::OPTION_KEY_PREFIX
+        ));
     }
 
     /**
@@ -127,7 +151,11 @@ final class SettingsBackups
         $index = $this->index();
         $entries = [];
 
-        foreach (self::KEYS as $candidate) {
+        // The four named settings, plus every theme option that has been backed
+        // up: those arrive as "option:<name>" keys and are only in the index.
+        $candidates = array_values(array_unique(array_merge(self::KEYS, array_keys($index))));
+
+        foreach ($candidates as $candidate) {
             if ($key !== null && $candidate !== $key) {
                 continue;
             }

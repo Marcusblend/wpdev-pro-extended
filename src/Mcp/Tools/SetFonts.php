@@ -135,13 +135,21 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
             $catalog = $this->gateway->fontCatalog();
             $touched = array_merge($merge['added'], array_column($merge['updated'], '_id'));
 
+            $before = [];
+
+            foreach ($storedItems as $storedEntry) {
+                if (is_array($storedEntry) && isset($storedEntry['_id']) && is_string($storedEntry['_id'])) {
+                    $before[$storedEntry['_id']] = $storedEntry;
+                }
+            }
+
             foreach ($merge['items'] as $position => $entry) {
                 if (! is_array($entry) || ! in_array($entry['_id'] ?? null, $touched, true)) {
                     continue;
                 }
 
                 $isNew = in_array($entry['_id'], $merge['added'], true);
-                $merge['items'][$position] = FontItems::complete($entry, $config, $catalog, $isNew, $errors);
+                $merge['items'][$position] = FontItems::complete($entry, $config, $catalog, $isNew, $errors, $before[(string) $entry['_id']] ?? null);
             }
 
             // Report the completed entries.

@@ -7,11 +7,15 @@ namespace ProExtended\Mcp;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
+use ProExtended\Cornerstone\Permissions;
 use ProExtended\Elements\SchemaExtractor;
+use ProExtended\Site\PlatformSnapshot;
+use ProExtended\Templates\TemplateGateway;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\Resources\ResourceInterface;
 use ProExtended\Mcp\Tools\AnnotatedToolInterface;
 use ProExtended\Mcp\Tools\ToolInterface;
+use ProExtended\Menus\MenuGateway;
 use ProExtended\Media\MediaImporter;
 use ProExtended\Settings\ReferenceScanner;
 use ProExtended\Settings\SettingsBackups;
@@ -270,6 +274,13 @@ TXT;
             ));
         }
 
+        // Then Cornerstone's own, which a site can take away separately.
+        $denial = (new Permissions())->denialFor($toolName);
+
+        if ($denial !== null) {
+            return $this->error($id, self::ERR_INVALID_REQ, $denial);
+        }
+
         try {
             if (is_string($arguments)) {
                 $arguments = JsonArgs::decodeValue($arguments, 'arguments');
@@ -377,6 +388,7 @@ TXT;
         $schema    = $this->schema;
         $layouts   = $this->layouts;
         $elements  = new ElementContext($schema);
+        $templates = new TemplateGateway();
 
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
@@ -395,14 +407,19 @@ TXT;
             'list_colors'           => static fn() => new Tools\ListColors(),
             'list_fonts'            => static fn() => new Tools\ListFonts(),
             'get_site_info'         => fn() => new Tools\GetSiteInfo(new Health($gateway, $hostCache, $this)),
+            'list_templates'        => static fn() => new Tools\ListTemplates($templates),
+            'get_template'          => static fn() => new Tools\GetTemplate($templates),
+            'export_tco'            => static fn() => new Tools\ExportTco($templates),
+            'get_platform_baseline' => static fn() => new Tools\GetPlatformBaseline(new PlatformSnapshot($schema, $gateway, $elements)),
+            'list_prefabs'          => static fn() => new Tools\ListPrefabs(new \ProExtended\Cornerstone\Prefabs()),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
             'deploy_layout'         => static fn() => new Tools\DeployLayout($layouts, $validator(), $elements),
             'backup_layout'         => static fn() => new Tools\BackupLayout($layouts),
             'restore_layout'        => static fn() => new Tools\RestoreLayout($layouts),
-            'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache),
-            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements),
+            'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache, $schema),
+            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements, $templates),
 
             // Site foundations (1.1.0).
             'create_document'          => static fn() => new Tools\CreateDocument($layouts, $validator(), $elements),
@@ -414,6 +431,15 @@ TXT;
             'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
+            'update_theme_options'     => static fn() => new Tools\UpdateThemeOptions($gateway, $backups, new ThemeOptionsReader()),
+            'set_variables'            => static fn() => new Tools\SetVariables($gateway, $backups),
+            'set_global_parameters'    => static fn() => new Tools\SetGlobalParameters($gateway, $backups, $elements),
+            'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
+            'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
+            'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
+            'create_component'         => static fn() => new Tools\CreateComponent($layouts, $validator(), $elements),
+            'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
+            'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
             'restore_settings'         => static fn() => new Tools\RestoreSettings($backups),
 

@@ -91,6 +91,24 @@ final class FontItems
     }
 
     /**
+     * Whether an update leaves the font's family exactly as stored.
+     *
+     * @param array<string, mixed>      $font
+     * @param array<string, mixed>|null $stored
+     */
+    private static function familyUnchanged(array $font, ?array $stored, bool $isNew): bool
+    {
+        if ($isNew || $stored === null) {
+            return false;
+        }
+
+        $was = $stored['family'] ?? null;
+        $now = $font['family'] ?? null;
+
+        return is_string($was) && $was !== '' && $was === $now;
+    }
+
+    /**
      * Fill in name, stack and weights the way Cornerstone derives them, and
      * check the result.
      *
@@ -98,9 +116,10 @@ final class FontItems
      * @param  array<string, mixed>                     $config   Font config after this call's changes.
      * @param  array<string, array<string, mixed>>|null $catalog  Cornerstone's system/Google font list.
      * @param  string[]                                 $errors
+     * @param  array<string, mixed>|null                $stored   The entry as it stands on the site, for an update.
      * @return array<string, mixed>
      */
-    public static function complete(array $font, array $config, ?array $catalog, bool $isNew, array &$errors): array
+    public static function complete(array $font, array $config, ?array $catalog, bool $isNew, array &$errors, ?array $stored = null): array
     {
         $id = (string) ($font['_id'] ?? '?');
         $source = $font['source'] ?? null;
@@ -137,6 +156,21 @@ final class FontItems
                         $name = (string) $key;
                         break;
                     }
+                }
+
+                if ($name === null && self::familyUnchanged($font, $stored, $isNew)) {
+                    // Cornerstone drops Google families from its font list when
+                    // Google Fonts are off, which made every edit to an existing
+                    // Google font fail — including a title-only change. Nothing
+                    // about the family is changing here, so keep what is stored.
+                    $font['name'] ??= $stored['name'] ?? null;
+                    $font['stack'] ??= $stored['stack'] ?? '"' . $family . '"';
+
+                    if ($font['name'] === null) {
+                        unset($font['name']);
+                    }
+
+                    break;
                 }
 
                 if ($name === null) {

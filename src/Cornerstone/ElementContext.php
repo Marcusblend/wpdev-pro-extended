@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Cornerstone;
 
+use ProExtended\Elements\ControlSurface;
 use ProExtended\Elements\ElementStamper;
 use ProExtended\Elements\LintContext;
 use ProExtended\Elements\SchemaExtractor;
@@ -147,7 +148,34 @@ final class ElementContext
             Features::lintSwitches(),
             $this->conditionChecker(),
             $this->looperChecker(),
+            $this->cssPropertyChecker(),
         );
+    }
+
+    /**
+     * Which CSS properties an element type already has a style setting for.
+     *
+     * Reads the Inspector control surface once per type and remembers it, so a
+     * page full of headlines costs one lookup.
+     */
+    private function cssPropertyChecker(): \Closure
+    {
+        $cache = [];
+        $schema = $this->schema;
+
+        return static function (string $type) use (&$cache, $schema): array {
+            if (array_key_exists($type, $cache)) {
+                return $cache[$type];
+            }
+
+            try {
+                $cache[$type] = ControlSurface::cssProperties($schema->getSurface($type));
+            } catch (\Throwable) {
+                $cache[$type] = [];
+            }
+
+            return $cache[$type];
+        };
     }
 
     /**

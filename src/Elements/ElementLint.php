@@ -46,6 +46,7 @@ final class ElementLint
         'link-without-href'         => 'A container is set to render as a link but has no href, so it renders as a div.',
         'nested-link'               => 'A container link inside another link renders as a span; browsers do not allow nested links.',
         'background-layers-off'     => 'Background layers are set but the element\'s advanced background switch is off, so they do not render.',
+        'css-over-control'          => 'A css declaration sets a property the element already has a setting for; the setting is editable in the builder and can be bound to a parameter or global variable, a css block cannot.',
     ];
 
     /** What a missing _m changes, by type. */
@@ -258,6 +259,7 @@ final class ElementLint
         $this->checkTable($element, $type, $add);
         $this->checkLink($element, $type, $insideLink, $add);
         $this->checkLayers($element, $type, $add);
+        $this->checkCss($element, $type, $add);
     }
 
     private function checkType(string $type, \Closure $add): void
@@ -270,6 +272,58 @@ final class ElementLint
             $add('legacy-element', 'The v2 row and column only keep old content rendering; use layout-row and layout-column.');
         } elseif (in_array($type, self::INTERNAL_TYPES, true)) {
             $add('internal-element', 'Internal types do not belong in an element tree.');
+        }
+    }
+
+
+    /**
+     * Declarations written as raw CSS that the element has a setting for.
+     *
+     * An element authored through its own settings is one the client can adjust
+     * in the builder, bind to a parameter, or drive from a global variable. The
+     * same declaration inside the css key is invisible to all three, so it is
+     * worth naming the key instead. Only properties the element really has a
+     * style control for are reported, so this stays quiet for the cases where
+     * css is genuinely the only way.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function checkCss(array $element, string $type, \Closure $add): void
+    {
+        $css = $element['css'] ?? null;
+
+        if (! is_string($css) || trim($css) === '' || $this->context->cssProperties === null) {
+            return;
+        }
+
+        $available = ($this->context->cssProperties)($type);
+
+        if (! is_array($available) || $available === []) {
+            return;
+        }
+
+        $seen = [];
+
+        // Declarations only: a property name followed by a colon, at the start
+        // of a block or after a semicolon. Selectors and values are skipped.
+        if (preg_match_all('/(?:^|[{;])\s*([a-z][a-z-]{2,30})\s*:/i', $css, $matches) === false) {
+            return;
+        }
+
+        foreach ($matches[1] as $property) {
+            $property = strtolower($property);
+
+            if (isset($seen[$property]) || ! isset($available[$property])) {
+                continue;
+            }
+
+            $seen[$property] = true;
+
+            $add('css-over-control', sprintf(
+                'css sets %s, which this element has a setting for: %s. Setting the key keeps it editable in the builder and bindable to a parameter or global variable.',
+                $property,
+                $available[$property]
+            ));
         }
     }
 
