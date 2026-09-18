@@ -8,6 +8,7 @@ use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Elements\SchemaExtractor;
+use ProExtended\Templates\TemplateGateway;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\Resources\ResourceInterface;
 use ProExtended\Mcp\Tools\AnnotatedToolInterface;
@@ -378,6 +379,7 @@ TXT;
         $schema    = $this->schema;
         $layouts   = $this->layouts;
         $elements  = new ElementContext($schema);
+        $templates = new TemplateGateway();
 
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
@@ -396,13 +398,16 @@ TXT;
             'list_colors'           => static fn() => new Tools\ListColors(),
             'list_fonts'            => static fn() => new Tools\ListFonts(),
             'get_site_info'         => fn() => new Tools\GetSiteInfo(new Health($gateway, $hostCache, $this)),
+            'list_templates'        => static fn() => new Tools\ListTemplates($templates),
+            'get_template'          => static fn() => new Tools\GetTemplate($templates),
+            'export_tco'            => static fn() => new Tools\ExportTco($templates),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
             'deploy_layout'         => static fn() => new Tools\DeployLayout($layouts, $validator(), $elements),
             'backup_layout'         => static fn() => new Tools\BackupLayout($layouts),
             'restore_layout'        => static fn() => new Tools\RestoreLayout($layouts),
-            'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache),
+            'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache, $schema),
             'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements),
 
             // Site foundations (1.1.0).
@@ -415,6 +420,8 @@ TXT;
             'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
+            'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
+            'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
             'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
