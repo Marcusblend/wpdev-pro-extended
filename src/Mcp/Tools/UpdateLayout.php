@@ -10,6 +10,7 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
+use ProExtended\Cornerstone\Prefabs;
 use ProExtended\Templates\TemplateGateway;
 use ProExtended\Templates\TemplateIdentifier;
 use ProExtended\Support\SkipValidation;
@@ -30,7 +31,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": "update"|"add"|"remove"|"preset", "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. The editing operations: move takes "to", the path the element lands at; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name" (list_prefabs reports them), already configured. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -142,6 +143,11 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                     'add'    => $this->applyAdd($data, $path, $value),
                     'remove' => $this->applyRemove($data, $path),
                     'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
+                    'move'      => $this->applyMove($data, $path, (string) ($op['to'] ?? '')),
+                    'duplicate' => $this->applyDuplicate($data, $path),
+                    'wrap'      => $this->applyWrap($data, $path, $value),
+                    'unwrap'    => $this->applyUnwrap($data, $path),
+                    'prefab'    => $this->applyPrefab($data, $path, (string) ($op['group'] ?? ''), (string) ($op['name'] ?? '')),
                     default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', $opType)),
                 };
             } catch (\Throwable $e) {
@@ -388,6 +394,172 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         $atts['_type'] ??= (string) $row['sub_type'];
 
         return $atts;
+    }
+
+    /**
+     * Move an element to another place in the tree.
+     *
+     * "to" is where it lands, as a path: the element currently there is pushed
+     * down, the way dropping one above another behaves in the builder.
+     */
+    private function applyMove(array &$data, string $path, string $to): void
+    {
+        if ($to === '') {
+            throw new \InvalidArgumentException('A move needs "to": the path it should land at.');
+        }
+
+        if ($to === $path) {
+            return;
+        }
+
+        if (str_starts_with($to, $path . '.')) {
+            throw new \InvalidArgumentException(sprintf('"%s" is inside "%s", so the element cannot move into itself.', $to, $path));
+        }
+
+        $node = $this->resolvePointer($data, $path);
+
+        if (! is_array($node)) {
+            throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
+        }
+
+        $moving = $node;
+
+        // Remove first, then insert: with both paths in the same list, taking
+        // the element out shifts anything after it, and the destination has to
+        // be read in the tree as it stands once it is gone.
+        $this->applyRemove($data, $path);
+
+        try {
+            $this->applyAdd($data, $to, $moving);
+        } catch (\Throwable $e) {
+            // Put it back rather than leaving the element nowhere.
+            $this->applyAdd($data, $path, $moving);
+
+            throw new \InvalidArgumentException(sprintf('The element could not be moved to "%s": %s', $to, $e->getMessage()));
+        }
+    }
+
+    /**
+     * Copy an element in beside itself.
+     */
+    private function applyDuplicate(array &$data, string $path): void
+    {
+        $node = $this->resolvePointer($data, $path);
+
+        if (! is_array($node)) {
+            throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
+        }
+
+        $parts = $this->parsePath($path);
+        $index = end($parts);
+
+        if (! is_numeric($index)) {
+            throw new \InvalidArgumentException(sprintf('"%s" is not in a list, so there is nowhere beside it to copy to.', $path));
+        }
+
+        // An id is per-element; a copy that kept it would be two elements
+        // claiming the same one.
+        $copy = $this->forgetIds($node);
+        $parentPath = implode('.', array_slice($parts, 0, -1));
+
+        $this->applyAdd($data, ($parentPath === '' ? '' : $parentPath . '.') . ((int) $index + 1), $copy);
+    }
+
+    /**
+     * Put an element inside a new parent, in place.
+     */
+    private function applyWrap(array &$data, string $path, mixed $wrapper): void
+    {
+        if (! is_array($wrapper) || ! is_string($wrapper['_type'] ?? null) || $wrapper['_type'] === '') {
+            throw new \InvalidArgumentException('A wrap needs "value": the element to wrap with, including its _type.');
+        }
+
+        $target = &$this->resolvePointer($data, $path);
+
+        if (! is_array($target)) {
+            throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
+        }
+
+        $existing = is_array($wrapper['_modules'] ?? null) ? $wrapper['_modules'] : [];
+        $existing[] = $target;
+        $wrapper['_modules'] = $existing;
+
+        $target = $wrapper;
+        unset($target);
+    }
+
+    /**
+     * Take an element out and leave its children in its place.
+     */
+    private function applyUnwrap(array &$data, string $path): void
+    {
+        $node = $this->resolvePointer($data, $path);
+
+        if (! is_array($node)) {
+            throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
+        }
+
+        $children = is_array($node['_modules'] ?? null) ? array_values($node['_modules']) : [];
+
+        if ($children === []) {
+            throw new \InvalidArgumentException(sprintf('"%s" has no children, so unwrapping it would only delete it. Use remove.', $path));
+        }
+
+        $parts = $this->parsePath($path);
+        $index = end($parts);
+        $parentPath = implode('.', array_slice($parts, 0, -1));
+
+        if (! is_numeric($index)) {
+            throw new \InvalidArgumentException(sprintf('"%s" is not in a list, so its children have nowhere to go.', $path));
+        }
+
+        $parent = &$this->resolvePointer($data, $parentPath);
+
+        if (! is_array($parent)) {
+            throw new \InvalidArgumentException(sprintf('Parent path "%s" does not point to an array.', $parentPath));
+        }
+
+        array_splice($parent, (int) $index, 1, $children);
+        unset($parent);
+    }
+
+    /**
+     * Insert one of Cornerstone's prefab elements by name.
+     */
+    private function applyPrefab(array &$data, string $path, string $group, string $name): void
+    {
+        if ($group === '' || $name === '') {
+            throw new \InvalidArgumentException('A prefab operation needs "group" and "name". list_prefabs reports both.');
+        }
+
+        $values = (new Prefabs())->values($group, $name);
+
+        if ($values === null) {
+            throw new \InvalidArgumentException(sprintf('No prefab "%s" in group "%s". Use list_prefabs to see them.', $name, $group));
+        }
+
+        $this->applyAdd($data, $path, $values);
+    }
+
+    /**
+     * Strip the ids from a copied subtree.
+     *
+     * @param  array<string, mixed> $element
+     * @return array<string, mixed>
+     */
+    private function forgetIds(array $element): array
+    {
+        unset($element['_id'], $element['_c_id'], $element['_parent']);
+
+        if (isset($element['_modules']) && is_array($element['_modules'])) {
+            foreach ($element['_modules'] as $key => $child) {
+                if (is_array($child)) {
+                    $element['_modules'][$key] = $this->forgetIds($child);
+                }
+            }
+        }
+
+        return $element;
     }
 
     /**

@@ -71,6 +71,10 @@ final class Prefabs
             return null;
         }
 
+        // get_library() is what loads Cornerstone's prefab files; asking for a
+        // prefab's values without it finds nothing, whatever the name.
+        $this->library();
+
         $values = BuilderContext::read(static fn (): mixed => cs_prefab_element_values($group, $name));
 
         return is_array($values) && $values !== [] ? $values : null;
