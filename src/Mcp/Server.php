@@ -408,7 +408,7 @@ TXT;
             'backup_layout'         => static fn() => new Tools\BackupLayout($layouts),
             'restore_layout'        => static fn() => new Tools\RestoreLayout($layouts),
             'clear_cache'           => static fn() => new Tools\ClearCache($gateway, $hostCache, $schema),
-            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements),
+            'update_layout'         => static fn() => new Tools\UpdateLayout($layouts, $validator(), $elements, $templates),
 
             // Site foundations (1.1.0).
             'create_document'          => static fn() => new Tools\CreateDocument($layouts, $validator(), $elements),

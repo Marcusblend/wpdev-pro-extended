@@ -10,6 +10,8 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
+use ProExtended\Templates\TemplateGateway;
+use ProExtended\Templates\TemplateIdentifier;
 use ProExtended\Support\SkipValidation;
 
 final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
@@ -18,6 +20,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
         private readonly ?ElementContext $elements = null,
+        private readonly ?TemplateGateway $templates = null,
     ) {}
 
     public function name(): string
@@ -27,7 +30,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Supports adding, removing, and updating elements. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": "update"|"add"|"remove"|"preset", "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -138,6 +141,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                     'update' => $this->applyUpdate($data, $path, $value),
                     'add'    => $this->applyAdd($data, $path, $value),
                     'remove' => $this->applyRemove($data, $path),
+                    'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
                     default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', $opType)),
                 };
             } catch (\Throwable $e) {
@@ -306,6 +310,84 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         } else {
             $parent[$index] = $value;
         }
+    }
+
+    /**
+     * Apply a saved preset's settings to the element at a path.
+     *
+     * A preset is a template of settings for one element type, and applying one
+     * is how a client-editable look is reused: the element keeps its own
+     * content, id and children, and takes the preset's styling keys. The
+     * element's type has to match the preset's, or the settings would mean
+     * nothing on it.
+     */
+    private function applyPreset(array &$data, string $path, mixed $preset): void
+    {
+        if ($this->templates === null) {
+            throw new \RuntimeException('The template library is not available on this site, so presets cannot be applied.');
+        }
+
+        $atts = $this->presetAtts($preset);
+        $forType = (string) ($atts['_type'] ?? '');
+        unset($atts['_type']);
+
+        if ($atts === []) {
+            throw new \InvalidArgumentException('That preset holds no settings.');
+        }
+
+        $target = &$this->resolvePointer($data, $path);
+
+        if (! is_array($target)) {
+            throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
+        }
+
+        $targetType = (string) ($target['_type'] ?? '');
+
+        if ($forType !== '' && $targetType !== '' && $forType !== $targetType) {
+            throw new \InvalidArgumentException(sprintf('That preset is for a "%s"; the element at "%s" is a "%s".', $forType, $path, $targetType));
+        }
+
+        // The element's own identity and children are never part of a preset.
+        unset($atts['_id'], $atts['_modules'], $atts['_region'], $atts['_parent'], $atts['_c_id']);
+
+        $target = array_merge($target, $atts);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function presetAtts(mixed $preset): array
+    {
+        $row = null;
+
+        if (is_int($preset) || (is_string($preset) && ctype_digit($preset))) {
+            $row = $this->templates->get((int) $preset);
+        } elseif (is_string($preset) && $preset !== '') {
+            foreach ($this->templates->all(null, $preset, 50) as $candidate) {
+                if ($candidate['kind'] === 'preset' && strcasecmp($candidate['title'], $preset) === 0) {
+                    $row = $this->templates->get((int) $candidate['id']);
+                    break;
+                }
+            }
+        }
+
+        if ($row === null) {
+            throw new \InvalidArgumentException('preset must be a preset template ID or its exact title. Use list_templates with kind: "preset".');
+        }
+
+        if (! TemplateIdentifier::isPreset((string) ($row['type'] ?? ''), (string) ($row['sub_type'] ?? ''))) {
+            throw new \InvalidArgumentException(sprintf('Template %d is a %s, not a preset.', (int) $row['id'], (string) ($row['kind'] ?? 'template')));
+        }
+
+        $atts = $row['content']['atts'] ?? null;
+
+        if (! is_array($atts)) {
+            throw new \InvalidArgumentException(sprintf('Preset %d has no stored settings.', (int) $row['id']));
+        }
+
+        $atts['_type'] ??= (string) $row['sub_type'];
+
+        return $atts;
     }
 
     /**
