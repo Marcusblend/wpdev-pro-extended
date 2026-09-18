@@ -421,6 +421,8 @@ TXT;
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
             'update_theme_options'     => static fn() => new Tools\UpdateThemeOptions($gateway, $backups, new ThemeOptionsReader()),
+            'set_variables'            => static fn() => new Tools\SetVariables($gateway, $backups),
+            'set_global_parameters'    => static fn() => new Tools\SetGlobalParameters($gateway, $backups, $elements),
             'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
