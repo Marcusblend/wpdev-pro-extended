@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ProExtended\Elements;
 
+use ProExtended\Cornerstone\BuilderContext;
+
 /**
  * Extract element definitions and schemas from Cornerstone's registry.
  *
@@ -17,9 +19,6 @@ final class SchemaExtractor
     /** One transient per element type, plus an index so they can all be cleared. */
     private const SURFACE_PREFIX = 'pe_element_surface_';
     private const SURFACE_INDEX = 'pe_element_surface_index';
-
-    /** Cornerstone assembles Inspector data once per request; so do we. */
-    private static bool $builderContext = false;
 
     /** @var array<string, mixed>|null */
     private static ?array $inspector = null;
@@ -302,21 +301,7 @@ final class SchemaExtractor
             return self::$inspector = [];
         }
 
-        if (! self::$builderContext) {
-            self::$builderContext = true;
-            do_action('cs_before_late_data');
-        }
-
-        $previous = set_error_handler(static fn (): bool => true, E_USER_WARNING | E_WARNING);
-
-        try {
-            $data = $elements->get_element_inspector_data();
-        } catch (\Throwable) {
-            $data = [];
-        } finally {
-            restore_error_handler();
-            unset($previous);
-        }
+        $data = BuilderContext::read(static fn (): mixed => $elements->get_element_inspector_data(), []);
 
         return self::$inspector = is_array($data) ? $data : [];
     }

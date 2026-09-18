@@ -411,6 +411,7 @@ TXT;
             'get_template'          => static fn() => new Tools\GetTemplate($templates),
             'export_tco'            => static fn() => new Tools\ExportTco($templates),
             'get_platform_baseline' => static fn() => new Tools\GetPlatformBaseline(new PlatformSnapshot($schema, $gateway, $elements)),
+            'list_prefabs'          => static fn() => new Tools\ListPrefabs(new \ProExtended\Cornerstone\Prefabs()),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
@@ -436,6 +437,7 @@ TXT;
             'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
+            'create_component'         => static fn() => new Tools\CreateComponent($layouts, $validator(), $elements),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
             'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
