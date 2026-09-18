@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`list_dynamic_content`**: the Dynamic Content tokens this site has — every group and field, the token each writes (`{{dc:post:title}}`) and the named arguments a field takes, with an example. Which groups exist depends on what is installed, and a token for a field the site lacks renders as nothing rather than erroring, so the catalog is worth having before writing one
+- **`render_preview`**: renders elements to HTML without saving — either elements passed in, or part of a stored layout by `post_id` and `path` — against a chosen post, so loopers, conditions and tokens resolve as they would on the front end. A looper with no results, a condition that hides its element and a token that resolves to nothing all save without complaint; this is where they become visible, and the result says when the render came out empty. Defaults are applied at every level (an element rendered without them emits broken markup) and Cornerstone's own notices for the bookkeeping keys a loose subtree lacks are kept out of the response
 - **`get_write_journal`**: what the plugin has changed on this site, newest first — tool, user, time, what it touched and a short summary. Every write is recorded, dry runs included and filterable, where the settings backups only cover the few things they hold
 
 ## [1.3.0] - 2026-09-18

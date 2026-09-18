@@ -421,6 +421,7 @@ TXT;
             'list_prefabs'          => static fn() => new Tools\ListPrefabs(new \ProExtended\Cornerstone\Prefabs()),
             'list_dynamic_content'  => static fn() => new Tools\ListDynamicContent(new \ProExtended\Cornerstone\DynamicContentCatalog()),
             'get_write_journal'     => static fn() => new Tools\GetWriteJournal(new WriteJournal()),
+            'render_preview'        => static fn() => new Tools\RenderPreview(new \ProExtended\Cornerstone\Renderer(), $layouts),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),

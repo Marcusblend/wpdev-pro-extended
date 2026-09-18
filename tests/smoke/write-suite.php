@@ -174,7 +174,7 @@ foreach ((array) ($list['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 42, 'lists 42 tools', (string) count($tools));
+S::check(count($tools) === 43, 'lists 43 tools', (string) count($tools));
 S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 12 newer tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 S::check(($tools['upload_media']['annotations']['openWorldHint'] ?? null) === true, 'upload_media is open-world');
