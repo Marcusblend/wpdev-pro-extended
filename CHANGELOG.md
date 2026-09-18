@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`get_element_schema` control surface**: the settings an element type has, grouped as the builder's Inspector groups them — tab, panel, label, control type, accepted values, defaults, and the flat key or keys each control writes, including `named_keys` for controls that write several at once (`font_size` to `text_font_size`). `writes` says whether a setting changes style, markup or both. `search` narrows to matching controls. Cornerstone assembles this only in a builder context, so the plugin enters one on this read path, once per request, and caches the result
 - **`elements` in `clear_cache`**: drops the cached element definitions and control surfaces, which a Cornerstone update changes
 
+### Fixed
+
+- **Max package names printed blank**: Cornerstone stores no title on most `x_max_plugins` entries, so `get_site_info` reported every Max product with an empty name. A package now takes the name the entry carries, or its slug read as words
+- **`set_fonts` refused any edit to a Google font while Google Fonts were off**, including a title-only change, because Cornerstone drops Google families from its font list when the feature is disabled. The font list is only consulted when the family itself changes
+
 ### Changed
 
 - **`get_element_schema` returns the control surface by default.** The previous output — Cornerstone's full definition and defaults — is still available with `format: "raw"`
