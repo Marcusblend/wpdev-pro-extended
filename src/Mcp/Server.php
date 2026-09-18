@@ -12,6 +12,7 @@ use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\Resources\ResourceInterface;
 use ProExtended\Mcp\Tools\AnnotatedToolInterface;
 use ProExtended\Mcp\Tools\ToolInterface;
+use ProExtended\Menus\MenuGateway;
 use ProExtended\Media\MediaImporter;
 use ProExtended\Settings\ReferenceScanner;
 use ProExtended\Settings\SettingsBackups;
@@ -414,6 +415,8 @@ TXT;
             'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
+            'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
+            'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
             'restore_settings'         => static fn() => new Tools\RestoreSettings($backups),
 
