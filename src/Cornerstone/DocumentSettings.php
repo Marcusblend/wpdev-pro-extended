@@ -19,6 +19,9 @@ final class DocumentSettings
         $common = ['assignments', 'assignment_priority', 'customCSS', 'customJS'];
 
         return match (true) {
+            // A page (or any other content type) overrides which layout, header
+            // and footer it uses, and can carry its own CSS and JS.
+            str_starts_with($docType, 'content:') => ['layoutSingle', 'layoutHeader', 'layoutFooter', 'customCSS', 'customJS'],
             $docType === 'custom:component' => ['library_group', 'document_visibility', 'customCSS', 'customJS'],
             $docType === 'layout:header'    => [...$common, 'multi_region'],
             $docType === 'layout:footer'    => $common,
@@ -67,6 +70,40 @@ final class DocumentSettings
         return $clean;
     }
 
+    /** The layout override keys a content document carries, and the doc type each points at. */
+    public const LAYOUT_OVERRIDES = [
+        'layoutSingle' => 'layout:single',
+        'layoutHeader' => 'layout:header',
+        'layoutFooter' => 'layout:footer',
+    ];
+
+    /**
+     * Read a layout override: "default", "none", or a document ID.
+     *
+     * @return array{mode: string, id: int}
+     */
+    public static function readOverride(mixed $value): array
+    {
+        if (is_int($value) || (is_string($value) && ctype_digit($value))) {
+            $id = (int) $value;
+
+            if ($id > 0) {
+                return ['mode' => 'document', 'id' => $id];
+            }
+        }
+
+        $mode = is_string($value) ? strtolower(trim($value)) : '';
+
+        if (in_array($mode, ['default', 'none'], true)) {
+            return ['mode' => $mode, 'id' => 0];
+        }
+
+        throw new \InvalidArgumentException(sprintf(
+            '"%s" must be "default", "none", or the ID of the document to use.',
+            is_scalar($value) ? (string) $value : 'value'
+        ));
+    }
+
     /**
      * Whether settings contain code that needs the unfiltered_html capability.
      *
@@ -89,6 +126,13 @@ final class DocumentSettings
     private static function validateValue(string $key, mixed $value): mixed
     {
         switch ($key) {
+            case 'layoutSingle':
+            case 'layoutHeader':
+            case 'layoutFooter':
+                $override = self::readOverride($value);
+
+                return $override['mode'] === 'document' ? (string) $override['id'] : $override['mode'];
+
             case 'assignments':
                 return self::validateAssignments($value);
 
