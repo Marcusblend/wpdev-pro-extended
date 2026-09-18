@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-18
+
+"Site Systems": Pro Extended can now write the parts of a site a build actually starts with — menus and Pro headers, the template library, Theme Options, global variables and parameters, page-level layout overrides and components — and, following the Inspector, it can author elements through their own settings rather than a block of CSS. Existing tools keep their names, required inputs and result shapes, with one documented exception: `get_element_schema` returns the control surface by default and its previous output under `format: "raw"`.
+
 ### Added
 
 - **`create_menu` and `update_menu`**: navigation menus with items, order, nesting, theme locations and the anchor graphic meta Cornerstone's navigation elements read. Operations run in order and can refer to items added earlier in the same call by `ref`; removal needs `force`, locations change only when named, and `dry_run` reports what would be written
