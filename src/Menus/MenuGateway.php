@@ -179,6 +179,7 @@ final class MenuGateway
         $errors = [];
         $refs = [];
         $existing = [];
+        $positioned = [];
 
         foreach ($this->items($menuId) as $item) {
             $existing[(int) $item['id']] = $item;
@@ -258,11 +259,107 @@ final class MenuGateway
                 $this->writeGraphic($newId, $graphic);
             }
 
-            $existing[$newId] = ['id' => $newId, 'title' => $args['menu-item-title'] ?? ''];
+            if (($operation['position'] ?? null) !== null) {
+                $positioned[$newId] = (int) $operation['position'];
+            }
+
+            $written = ['id' => $newId];
+
+            foreach (MenuItems::FIELDS as $name => $key) {
+                if (array_key_exists($key, $args)) {
+                    $written[$name] = $args[$key];
+                }
+            }
+
+            // Merge, never replace: a second operation on the same item in the
+            // same call has to carry through everything the first one left alone.
+            $existing[$newId] = array_merge($existing[$newId] ?? [], $written);
             $applied[] = ['op' => $op, 'item' => $newId, 'ref' => $operation['ref'] ?? null];
         }
 
+        if (! $dryRun && $positioned !== []) {
+            $this->resequence($menuId, $positioned);
+        }
+
         return ['applied' => $applied, 'errors' => $errors, 'refs' => $refs];
+    }
+
+    /**
+     * Renumber a menu so the positions operations asked for actually hold.
+     *
+     * wp_update_nav_menu_item() writes menu-item-position straight into
+     * menu_order and leaves every sibling where it was, so asking for position
+     * 1 still leaves whatever already sat there in front. Rebuilding the order
+     * the way the menu screen does — siblings in sequence, each parent before
+     * its children — makes "1 is first" true, and normalises a menu whose
+     * items were only ever appended.
+     *
+     * @param array<int, int> $positioned Item ID => the position it asked for (1 is first).
+     */
+    private function resequence(int $menuId, array $positioned): void
+    {
+        $items = wp_get_nav_menu_items($menuId, ['update_post_term_cache' => false]);
+
+        if (! is_array($items) || $items === []) {
+            return;
+        }
+
+        $parents = [];
+        $orders = [];
+
+        foreach ($items as $item) {
+            $id = (int) $item->ID;
+            $parents[$id] = (int) $item->menu_item_parent;
+            $orders[$id] = (int) $item->menu_order;
+        }
+
+        $children = [];
+
+        foreach ($parents as $id => $parent) {
+            $children[$parent][] = $id;
+        }
+
+        foreach ($children as $parent => $ids) {
+            usort($ids, static fn (int $a, int $b): int => $orders[$a] <=> $orders[$b]);
+            $children[$parent] = $ids;
+        }
+
+        foreach ($positioned as $id => $position) {
+            if (! isset($parents[$id])) {
+                continue;
+            }
+
+            $parent = $parents[$id];
+            $siblings = array_values(array_filter(
+                $children[$parent] ?? [],
+                static fn (int $sibling): bool => $sibling !== $id
+            ));
+
+            array_splice($siblings, max(0, min($position - 1, count($siblings))), 0, [$id]);
+            $children[$parent] = $siblings;
+        }
+
+        $order = 0;
+        $seen = [];
+
+        $walk = function (int $parent) use (&$walk, $children, &$order, $orders, &$seen): void {
+            foreach ($children[$parent] ?? [] as $id) {
+                if (isset($seen[$id])) {
+                    continue;
+                }
+
+                $seen[$id] = true;
+                $order++;
+
+                if (($orders[$id] ?? 0) !== $order) {
+                    wp_update_post(['ID' => $id, 'menu_order' => $order]);
+                }
+
+                $walk($id);
+            }
+        };
+
+        $walk(0);
     }
 
     /**
@@ -306,9 +403,9 @@ final class MenuGateway
             $args['menu-item-parent-id'] = ($parent['kind'] ?? '') === 'root' ? 0 : $this->resolve($parent, $refs);
         }
 
-        if (($operation['position'] ?? null) !== null) {
-            $args['menu-item-position'] = (int) $operation['position'];
-        }
+        // menu-item-position is deliberately not passed through:
+        // wp_update_nav_menu_item() would write menu_order for this item and
+        // leave every sibling where it was. resequence() owns ordering.
 
         return $args;
     }
