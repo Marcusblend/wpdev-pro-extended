@@ -30,7 +30,6 @@ final class ListSettingsBackups implements ToolInterface, AnnotatedToolInterface
             'properties' => [
                 'key' => [
                     'type'        => 'string',
-                    'enum'        => SettingsBackups::KEYS,
                     'description' => 'Optional. Only this settings key.',
                 ],
             ],
@@ -40,7 +39,11 @@ final class ListSettingsBackups implements ToolInterface, AnnotatedToolInterface
     public function execute(array $arguments): mixed
     {
         Args::rejectUnknown($arguments, ['key'], 'arguments');
-        $key = Args::enum($arguments, 'key', SettingsBackups::KEYS, null);
+        $key = Args::string($arguments, 'key', null, 200);
+
+        if ($key !== null && ! in_array($key, SettingsBackups::KEYS, true) && ! str_starts_with($key, SettingsBackups::OPTION_KEY_PREFIX)) {
+            throw new \InvalidArgumentException(sprintf('key must be one of %s, or "%s<theme option name>" for a theme option.', implode(', ', SettingsBackups::KEYS), SettingsBackups::OPTION_KEY_PREFIX));
+        }
         $backups = $this->backups->list($key);
 
         return [

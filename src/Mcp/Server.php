@@ -420,6 +420,7 @@ TXT;
             'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
             'list_menus'               => static fn() => new Tools\ListMenus(),
+            'update_theme_options'     => static fn() => new Tools\UpdateThemeOptions($gateway, $backups, new ThemeOptionsReader()),
             'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
