@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Header presets on `create_document`** (`preset`, `preset_options`): `header.simple`, `header.mega` and `mega_menu_panel` build bar to container to navigation, with a dropdown panel of link columns for a mega menu. Generated elements are stamped, so a collapsed navigation does not fall back to the legacy off-canvas behaviour
 - **`get_element_schema` control surface**: the settings an element type has, grouped as the builder's Inspector groups them — tab, panel, label, control type, accepted values, defaults, and the flat key or keys each control writes, including `named_keys` for controls that write several at once (`font_size` to `text_font_size`). `writes` says whether a setting changes style, markup or both. `search` narrows to matching controls. Cornerstone assembles this only in a builder context, so the plugin enters one on this read path, once per request, and caches the result
 - **`elements` in `clear_cache`**: drops the cached element definitions and control surfaces, which a Cornerstone update changes
+- **`css-over-control` lint warning**: a `css` declaration that sets a property the element already has a style setting for is reported with the key to set instead, since a setting stays editable in the builder and can be bound to a parameter or global variable while a css block cannot. Only properties the element really has a control for are named, and a property with no setting (or an element the registry cannot describe) is left alone
 
 ### Fixed
 

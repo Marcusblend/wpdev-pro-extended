@@ -158,3 +158,31 @@ T::same(4, count(ControlSurface::search($surface, 'font')['panels']), 'the panel
 $bare = ControlSurface::build([], [], []);
 T::same([], $bare['controls'], 'an element with no inspector data yields no controls');
 T::same([], $bare['panels'], 'and no panels');
+
+// CSS properties an element already has a setting for ------------------------
+
+$props = ControlSurface::cssProperties($surface);
+
+T::same('text_base_font_size', $props['font-size'] ?? null, 'a key ending in font_size claims font-size');
+T::same('text_text_color', $props['color'] ?? null, 'a named key claims its own property');
+T::same('text_text_align', $props['text-align'] ?? null, 'and so does a named key with a prefixed key');
+T::same('text_border_radius', $props['border-radius'] ?? null, 'a two-word property is matched');
+T::ok(! isset($props['display']), 'a property no control writes is absent');
+
+$markupOnly = ControlSurface::cssProperties(ControlSurface::build(
+    ['control_nav' => ['a' => 'A', 'a:one' => 'One'], 'controls' => [
+        ['key' => 'thing_position', 'type' => 'select', 'group' => 'a:one', 'label' => 'Tag'],
+    ]],
+    ['thing_position' => 'markup'],
+    []
+));
+T::same([], $markupOnly, 'a markup key is not a style declaration, even when it reads like one');
+
+$longest = ControlSurface::cssProperties(ControlSurface::build(
+    ['control_nav' => ['a' => 'A', 'a:one' => 'One'], 'controls' => [
+        ['key' => 'box_max_width', 'type' => 'unit-slider', 'group' => 'a:one', 'label' => 'Max Width'],
+    ]],
+    ['box_max_width' => 'style'],
+    []
+));
+T::same(['max-width' => 'box_max_width'], $longest, 'the longest property name wins over a shorter suffix');

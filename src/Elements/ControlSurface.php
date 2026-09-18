@@ -26,6 +26,70 @@ namespace ProExtended\Elements;
  */
 final class ControlSurface
 {
+    /**
+     * CSS properties Cornerstone's controls write, used to read a property out
+     * of a key name. Deliberately not the whole CSS spec: a name that is not
+     * here simply yields no match, and the lint stays quiet.
+     */
+    private const CSS_PROPERTIES = [
+        'font-family', 'font-size', 'font-weight', 'font-style', 'line-height', 'letter-spacing',
+        'text-align', 'text-decoration', 'text-transform', 'text-shadow', 'text-indent', 'white-space',
+        'color', 'background-color', 'background-image', 'background-position', 'background-size',
+        'background-repeat', 'background-attachment', 'opacity', 'mix-blend-mode',
+        'margin', 'padding', 'border', 'border-radius', 'border-width', 'border-style', 'border-color',
+        'box-shadow', 'outline',
+        'width', 'min-width', 'max-width', 'height', 'min-height', 'max-height', 'aspect-ratio',
+        'display', 'position', 'top', 'right', 'bottom', 'left', 'z-index', 'float', 'clear',
+        'overflow', 'overflow-x', 'overflow-y', 'visibility', 'pointer-events', 'cursor',
+        'flex', 'flex-direction', 'flex-wrap', 'flex-grow', 'flex-shrink', 'flex-basis',
+        'justify-content', 'align-items', 'align-self', 'align-content', 'order', 'gap',
+        'row-gap', 'column-gap', 'grid-template-columns', 'grid-template-rows', 'grid-column', 'grid-row',
+        'transform', 'transition', 'animation', 'filter', 'backdrop-filter', 'object-fit', 'object-position',
+    ];
+
+    /**
+     * Control types whose named keys can be read as CSS properties, and the
+     * prefix that makes each one whole. Any other composite control's names
+     * are meaningful only inside it, so they are left to the key rule.
+     */
+    private const NAMED_KEY_PREFIX = [
+        'text-format' => '',
+        'border'      => 'border-',
+    ];
+
+    /**
+     * Key names Cornerstone spells its own way.
+     */
+    private const ALIASES = [
+        'bg_color'          => 'background-color',
+        'bg_image'          => 'background-image',
+        'bg_position'       => 'background-position',
+        'bg_size'           => 'background-size',
+        'bg_repeat'         => 'background-repeat',
+        'text_color'        => 'color',
+        'font_color'        => 'color',
+        'base_font_size'    => 'font-size',
+        'flex_justify'      => 'justify-content',
+        'flex_align'        => 'align-items',
+        'flex_gap'          => 'gap',
+        'gap_column'        => 'column-gap',
+        'gap_row'           => 'row-gap',
+        'template_columns'  => 'grid-template-columns',
+        'template_rows'     => 'grid-template-rows',
+        'overflow_x'        => 'overflow-x',
+        'overflow_y'        => 'overflow-y',
+    ];
+
+    /**
+     * Segments that make the word after them belong to something inside the
+     * element rather than the element itself.
+     */
+    private const QUALIFIERS = [
+        'bg', 'graphic', 'icon', 'image', 'img', 'typing', 'subheadline', 'cursor',
+        'shadow', 'outline', 'particle', 'particles', 'mask', 'alt', 'toggle',
+        'dropdown', 'anchor', 'nav', 'sub', 'text', 'marker', 'bar', 'thumb',
+    ];
+
     /** Control types that hold other controls rather than writing keys themselves. */
     private const CONTAINER_TYPES = ['group', 'group-module'];
 
@@ -333,6 +397,117 @@ final class ControlSurface
         }
 
         return $accepts;
+    }
+
+
+    /**
+     * CSS properties this element already has a native control for.
+     *
+     * The answer to "is there a setting for this, or do I have to write CSS?".
+     * Cornerstone names its keys after the property they set, so a key ending
+     * in max_width sets max-width and a keys map names the property outright
+     * (font_size => text_font_size). Only style keys count: a markup key that
+     * happens to share a name sets an attribute, not a declaration.
+     *
+     * @param  array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>} $surface
+     * @return array<string, string> CSS property => the element key that writes it.
+     */
+    public static function cssProperties(array $surface): array
+    {
+        $properties = [];
+
+        foreach ($surface['controls'] as $control) {
+            $designations = (array) ($control['designations'] ?? []);
+
+            // A named key states its property, but only relative to its own
+            // control: "color" on a text-format control is the text colour,
+            // while "color" on a border control is border-color. Only the
+            // control types whose names can be read this way are used.
+            $type = (string) ($control['type'] ?? '');
+
+            if (array_key_exists($type, self::NAMED_KEY_PREFIX)) {
+                foreach ((array) ($control['named_keys'] ?? []) as $name => $key) {
+                    $property = self::property(self::NAMED_KEY_PREFIX[$type] . (string) $name);
+
+                    if ($property !== null && self::isStyle((string) $key, $designations)) {
+                        $properties[$property] ??= (string) $key;
+                    }
+                }
+            }
+
+            foreach ((array) ($control['keys'] ?? []) as $key) {
+                $key = (string) $key;
+
+                if (! self::isStyle($key, $designations)) {
+                    continue;
+                }
+
+                $property = self::propertyFromKey($key);
+
+                if ($property !== null) {
+                    $properties[$property] ??= $key;
+                }
+            }
+        }
+
+        return $properties;
+    }
+
+    /**
+     * @param array<string, mixed> $designations
+     */
+    private static function isStyle(string $key, array $designations): bool
+    {
+        $designation = $designations[$key] ?? null;
+
+        // Unknown designations are not assumed to be style: the lint that uses
+        // this map should stay quiet rather than name the wrong key.
+        return is_string($designation) && str_starts_with($designation, 'style');
+    }
+
+    /**
+     * The CSS property a key sets, by its trailing segments.
+     *
+     * Longest match wins, so text_max_width is max-width rather than width.
+     */
+    private static function propertyFromKey(string $key): ?string
+    {
+        $segments = explode('_', $key);
+        $count = count($segments);
+
+        for ($take = min(3, $count); $take >= 1; $take--) {
+            $candidate = implode('_', array_slice($segments, $count - $take));
+            $property = self::property($candidate);
+
+            if ($property === null) {
+                continue;
+            }
+
+            // A one-word match is only the element's own property when nothing
+            // qualifies it. text_graphic_icon_color is the icon's colour, not
+            // the element's, and naming it as "color" would send an author to
+            // the wrong setting — better to report nothing.
+            if ($take === 1 && $count > 1 && in_array($segments[$count - 2], self::QUALIFIERS, true)) {
+                return null;
+            }
+
+            return $property;
+        }
+
+        return null;
+    }
+
+    private static function property(string $name): ?string
+    {
+        $name = strtolower($name);
+
+        if (isset(self::ALIASES[$name])) {
+            return self::ALIASES[$name];
+        }
+
+        $property = str_replace('_', '-', $name);
+
+        return in_array($property, self::CSS_PROPERTIES, true) ? $property : null;
     }
 
     /**
