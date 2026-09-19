@@ -47,7 +47,7 @@ foreach ((array) (S::rpc('tools/list')['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 45, 'lists 45 tools', (string) count($tools));
+S::check(count($tools) === 46, 'lists 46 tools', (string) count($tools));
 S::check(isset($tools['get_theme_options']) && ($tools['get_theme_options']['annotations']['readOnlyHint'] ?? null) === true, 'get_theme_options is listed as read-only');
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 
