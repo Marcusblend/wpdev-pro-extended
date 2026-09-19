@@ -10,6 +10,7 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Cornerstone\Permissions;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Site\PlatformSnapshot;
+use ProExtended\Site\SiteSnapshot;
 use ProExtended\Site\WriteJournal;
 use ProExtended\Templates\TemplateGateway;
 use ProExtended\Layouts\LayoutService;
@@ -396,6 +397,7 @@ TXT;
         $layouts   = $this->layouts;
         $elements  = new ElementContext($schema);
         $templates = new TemplateGateway();
+        $siteSnapshot = new SiteSnapshot($gateway, $layouts, new ThemeOptionsReader(), new MenuGateway());
 
         // The validator memoizes the hierarchy map, so share one instance rather
         // than rebuilding it per tool.
@@ -422,6 +424,7 @@ TXT;
             'list_dynamic_content'  => static fn() => new Tools\ListDynamicContent(new \ProExtended\Cornerstone\DynamicContentCatalog()),
             'get_write_journal'     => static fn() => new Tools\GetWriteJournal(new WriteJournal()),
             'render_preview'        => static fn() => new Tools\RenderPreview(new \ProExtended\Cornerstone\Renderer(), $layouts),
+            'create_snapshot'       => static fn() => new Tools\CreateSnapshot($siteSnapshot),
 
             // Write tools.
             'create_page'           => static fn() => new Tools\CreatePage($layouts, $validator(), $elements),
@@ -448,6 +451,7 @@ TXT;
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
             'create_component'         => static fn() => new Tools\CreateComponent($layouts, $validator(), $elements),
+            'restore_snapshot'         => static fn() => new Tools\RestoreSnapshot($siteSnapshot, $backups),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
             'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),
             'list_settings_backups'    => static fn() => new Tools\ListSettingsBackups($backups),
