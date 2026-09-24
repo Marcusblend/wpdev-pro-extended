@@ -453,7 +453,6 @@ TXT;
             'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
             'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
             'create_component'         => static fn() => new Tools\CreateComponent($layouts, $validator(), $elements),
-            'restore_snapshot'         => static fn() => new Tools\RestoreSnapshot($siteSnapshot, $backups),
             'set_api_allowlist'        => static fn() => new Tools\SetApiAllowlist($backups),
             'create_menu'              => static fn() => new Tools\CreateMenu(new MenuGateway()),
             'update_menu'              => static fn() => new Tools\UpdateMenu(new MenuGateway()),

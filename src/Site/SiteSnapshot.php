@@ -13,27 +13,25 @@ use ProExtended\Settings\ThemeOptionsReader;
 use ProExtended\Settings\VariableItems;
 
 /**
- * Everything that makes a site look like itself, in one object.
+ * Everything that makes a site look like itself, in one read-only object.
  *
- * Across a hundred sites the two recurring needs are insurance — a record of
- * what the globals were before someone changed them — and reuse: taking a
- * starter setup from one build into the next. Both want the same thing: the
- * palette, the fonts, the Global CSS, the Theme Options that differ from their
- * defaults, the variables, the global parameters, and the menus.
+ * The palette, the fonts, the Global CSS, the Theme Options that differ from
+ * their defaults, the variables, the global parameters and the menus: a record
+ * of what the globals were, to compare against or to read a starter setup
+ * from. Nothing here writes. Putting settings back is Pro's own Theme Options
+ * export and import (colors and fonts included since Cornerstone 7.6.0),
+ * restore_settings for a single option, or a host backup; a restore that could
+ * write any option name its input carried was removed in 1.5.
  *
  * What a snapshot deliberately does not carry is the documents' element data.
  * A site's layouts run to megabytes, they are what backups and .tco archives
  * already handle well, and putting them in the same object as the settings
  * would make the common case — "what were the globals last week" — unusable.
- * The document set is recorded as an inventory instead, so a restore can say
- * what is missing rather than pretend to recreate it.
+ * The document set is recorded as an inventory instead.
  */
 final class SiteSnapshot
 {
     public const PARTS = ['colors', 'fonts', 'global_css', 'theme_options', 'variables', 'global_parameters', 'menus', 'documents'];
-
-    /** Parts a restore can actually write back. */
-    public const RESTORABLE = ['colors', 'fonts', 'global_css', 'theme_options', 'variables', 'global_parameters'];
 
     public function __construct(
         private readonly DocumentGateway $gateway,
@@ -83,89 +81,6 @@ final class SiteSnapshot
         return $snapshot;
     }
 
-    /**
-     * What restoring a snapshot would change, and optionally do it.
-     *
-     * @param  array<string, mixed> $snapshot
-     * @param  string[]             $parts
-     * @return array{changes: array<int, array<string, mixed>>, skipped: array<int, array<string, mixed>>, written: string[]}
-     */
-    public function restore(array $snapshot, array $parts, bool $dryRun, \Closure $backup): array
-    {
-        $changes = [];
-        $skipped = [];
-        $written = [];
-
-        foreach ($parts as $part) {
-            if (! in_array($part, self::RESTORABLE, true)) {
-                $skipped[] = ['part' => $part, 'reason' => sprintf('"%s" is recorded for reference but not written back; %s.', $part, $part === 'documents' ? 'use import_tco or deploy_layout for documents' : 'menus are rebuilt with create_menu and update_menu')];
-                continue;
-            }
-
-            if (! array_key_exists($part, $snapshot)) {
-                $skipped[] = ['part' => $part, 'reason' => 'The snapshot does not carry this part.'];
-                continue;
-            }
-
-            foreach ($this->optionsFor($part, $snapshot[$part]) as $option => $value) {
-                $current = get_option($option, null);
-
-                if ($this->same($current, $value)) {
-                    continue;
-                }
-
-                $changes[] = [
-                    'part'   => $part,
-                    'option' => $option,
-                    'from'   => $this->describe($current),
-                    'to'     => $this->describe($value),
-                ];
-
-                if ($dryRun) {
-                    continue;
-                }
-
-                $backup($option);
-                update_option($option, $value);
-                $written[] = $option;
-            }
-        }
-
-        if (! $dryRun && $written !== []) {
-            $this->gateway->purgeGenerated();
-        }
-
-        return ['changes' => $changes, 'skipped' => $skipped, 'written' => $written];
-    }
-
-    /**
-     * The options one part of a snapshot holds.
-     *
-     * @return array<string, mixed>
-     */
-    private function optionsFor(string $part, mixed $value): array
-    {
-        return match ($part) {
-            'colors'     => ['cornerstone_color_items' => $value],
-            'fonts'      => is_array($value)
-                ? array_filter([
-                    'cornerstone_font_items'  => $value['items'] ?? null,
-                    'cornerstone_font_config' => $value['config'] ?? null,
-                ], static fn (mixed $v): bool => $v !== null)
-                : [],
-            'global_css' => [$this->gateway->globalCssKey() => is_array($value) ? ($value['css'] ?? '') : $value],
-            'variables'  => [VariableItems::OPTION => $value],
-            'global_parameters' => is_array($value)
-                ? [
-                    GlobalParameters::JSON_OPTION => $value['json'] ?? '',
-                    GlobalParameters::DATA_OPTION => $value['data'] ?? [],
-                ]
-                : [],
-            'theme_options' => is_array($value) ? $value : [],
-            default => [],
-        };
-    }
-
     private function option(string $name): mixed
     {
         return get_option($name, null);
@@ -201,8 +116,8 @@ final class SiteSnapshot
 
         $changed = [];
 
-        // Keys another part of the snapshot already owns are left out, or the
-        // two would restore over each other: the variables and the global
+        // Keys another part of the snapshot already owns are left out, so the
+        // same value is not recorded twice: the variables and the global
         // parameters are theme options too, and so is the Global CSS.
         $owned = array_merge(
             ThemeOptionsReader::CODE_KEYS,
@@ -278,39 +193,5 @@ final class SiteSnapshot
         }
 
         return ['count' => count($rows), 'documents' => $rows];
-    }
-
-    private function same(mixed $a, mixed $b): bool
-    {
-        // An option that has never been set reads as null; a snapshot of it
-        // reads as "" or []. Restoring one over the other changes nothing, and
-        // reporting it as a change makes every diff look dirty.
-        if ($this->isEmpty($a) && $this->isEmpty($b)) {
-            return true;
-        }
-
-        if (is_scalar($a) && is_scalar($b)) {
-            return (string) $a === (string) $b;
-        }
-
-        return $a === $b;
-    }
-
-    private function isEmpty(mixed $value): bool
-    {
-        return $value === null || $value === '' || $value === [] || $value === false;
-    }
-
-    private function describe(mixed $value): mixed
-    {
-        if (is_array($value)) {
-            return ['type' => 'array', 'count' => count($value)];
-        }
-
-        if (is_string($value) && strlen($value) > 120) {
-            return ['type' => 'string', 'bytes' => strlen($value)];
-        }
-
-        return $value;
     }
 }
