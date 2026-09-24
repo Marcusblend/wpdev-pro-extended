@@ -166,6 +166,19 @@ final class CreateTranslation implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException(sprintf('Post %d is already in "%s".', $postId, $language));
         }
 
+        // Without a translation group there is nothing to join: WPML would
+        // start a new group for the copy and leave it unconnected to the
+        // source. Cornerstone's own translation endpoint refuses the same case.
+        $trid = apply_filters('wpml_element_trid', null, $postId, 'post_' . $post->post_type);
+
+        if (empty($trid)) {
+            throw new \InvalidArgumentException(sprintf(
+                'WPML has no translation group for post %d, so a copy could not be joined to it. Either WPML is not set to translate "%s" posts, or the post has not been saved since WPML was activated. Nothing was created.',
+                $postId,
+                $post->post_type
+            ));
+        }
+
         $newTitle = $title ?? $post->post_title;
         $postStatus = self::postStatus($post->post_type, $status);
         $metaKeys = self::copiedMetaKeys(array_keys((array) get_post_meta($postId)));
@@ -209,8 +222,6 @@ final class CreateTranslation implements ToolInterface, AnnotatedToolInterface
         // So the copy is made by hand, through the same slash-and-guard path
         // as every other raw document write.
         $newId = $this->gateway->insertRaw($post->post_content, self::postFields($post, $newTitle, $postStatus, $this->translatedParent($post, $language)));
-
-        $trid = apply_filters('wpml_element_trid', null, $postId, 'post_' . $post->post_type);
 
         do_action('wpml_set_element_language_details', [
             'element_id'           => $newId,
