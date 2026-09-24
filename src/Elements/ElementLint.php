@@ -86,6 +86,12 @@ final class ElementLint
     /** Colour properties a palette reference is the right answer for. */
     private const TOKENED_COLOR_PROPERTIES = ['color', 'background-color', 'border-color'];
 
+    /** CSS generic font families: a bare one is a fallback, not a font choice. */
+    private const GENERIC_FAMILIES = [
+        'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui',
+        'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong', 'inherit',
+    ];
+
     private const LEGACY_V2_TYPES = ['row', 'column'];
 
     /** Element types that can render as a link, with their key prefix. */
@@ -847,6 +853,9 @@ final class ElementLint
      * bury the two that matter. Shadows and gradients are untouched for the
      * same reason — they set box-shadow and background-image, not these.
      *
+     * Each key is checked as stored, as its interaction twin (<key>_alt, the
+     * hover and active value) and per breakpoint in _bp_data.
+     *
      * @param array<string, mixed> $element
      */
     private function checkLiteralValues(array $element, string $type, \Closure $add): void
@@ -861,52 +870,90 @@ final class ElementLint
             return;
         }
 
+        // The base value and its interaction (hover/active) twin: a control
+        // that writes "x" writes "x_alt" too, and the surface names only "x".
         foreach ($keys as $key => $property) {
-            $value = $element[$key] ?? null;
+            $key = (string) $key;
+            $this->checkLiteral($element[$key] ?? null, $key, (string) $property, $add);
 
-            if (! is_string($value)) {
+            $alt = $key . '_alt';
+
+            if (! isset($keys[$alt])) {
+                $this->checkLiteral($element[$alt] ?? null, $alt, (string) $property, $add);
+            }
+        }
+
+        // Per-breakpoint values: {"_bp_data4_4": {"text_text_color": [null, "#fff", ...]}}.
+        foreach ($element as $bpKey => $bpData) {
+            if (! is_string($bpKey) || ! preg_match('/^_bp_data\d+_\d+$/', $bpKey) || ! is_array($bpData)) {
                 continue;
             }
 
-            $value = trim($value);
+            foreach ($bpData as $key => $values) {
+                $key = (string) $key;
+                $property = $keys[$key] ?? (str_ends_with($key, '_alt') ? ($keys[substr($key, 0, -4)] ?? null) : null);
 
-            if ($value === '' || self::isReferenceOrKeyword($value)) {
-                continue;
-            }
+                if (! is_string($property) || ! is_array($values)) {
+                    continue;
+                }
 
-            if (in_array($property, self::TOKENED_COLOR_PROPERTIES, true) && self::isLiteralColor($value)) {
-                $add('literal-color', sprintf(
-                    '%s is the literal colour %s. A palette reference — "global-color:<id>", or "global-color:<id>:0.5" for alpha — follows the palette instead of keeping a copy of it. list_colors has the ids.',
-                    $key,
-                    $value
-                ));
-
-                continue;
-            }
-
-            if ($property === 'font-family') {
-                $add('literal-font-family', sprintf(
-                    '%s is the literal font stack %s. "global-ff:<id>" follows the site\'s fonts instead. list_fonts has the ids.',
-                    $key,
-                    strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value
-                ));
+                foreach ($values as $slot => $value) {
+                    $this->checkLiteral($value, sprintf('%s.%s[%s]', $bpKey, $key, (string) $slot), $property, $add);
+                }
             }
         }
     }
 
     /**
+     * One stored value: a literal colour or font stack where a reference belongs.
+     */
+    private function checkLiteral(mixed $value, string $label, string $property, \Closure $add): void
+    {
+        if (! is_string($value)) {
+            return;
+        }
+
+        $value = trim($value);
+
+        if ($value === '' || self::isReferenceOrKeyword($value)) {
+            return;
+        }
+
+        if (in_array($property, self::TOKENED_COLOR_PROPERTIES, true) && self::isLiteralColor($value)) {
+            $add('literal-color', sprintf(
+                '%s is the literal colour %s. A palette reference — "global-color:<id>", or "global-color:<id>:0.5" for alpha — follows the palette instead of keeping a copy of it. list_colors has the ids.',
+                $label,
+                $value
+            ));
+
+            return;
+        }
+
+        if ($property === 'font-family' && ! in_array(strtolower(trim($value, '"\' ')), self::GENERIC_FAMILIES, true)) {
+            $add('literal-font-family', sprintf(
+                '%s is the literal font stack %s. "global-ff:<id>" follows the site\'s fonts instead. list_fonts has the ids.',
+                $label,
+                strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value
+            ));
+        }
+    }
+
+    /**
      * Whether a value already points at something rather than stating it.
+     *
+     * A reference anywhere in the value counts: rgba(var(--brand-rgb), 0.5)
+     * and "global-color:brand:0.5" both follow the source they name.
      */
     private static function isReferenceOrKeyword(string $value): bool
     {
         foreach (['global-color:', 'global-ff:', 'global-fw:'] as $reference) {
-            if (str_starts_with($value, $reference)) {
+            if (str_contains($value, $reference)) {
                 return true;
             }
         }
 
         // A CSS custom property, or a Dynamic Content token that resolves later.
-        if (stripos($value, 'var(') === 0 || str_contains($value, '{{')) {
+        if (stripos($value, 'var(') !== false || str_contains($value, '{{')) {
             return true;
         }
 

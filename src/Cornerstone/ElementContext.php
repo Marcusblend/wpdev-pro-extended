@@ -164,9 +164,9 @@ final class ElementContext
     /**
      * What each of an element type's style keys sets, for the token lints.
      *
-     * Cached only, for the same reason as cssPropertyChecker(): this runs
-     * inside the validation every write tool performs, and building a surface
-     * there would enter builder context mid-save.
+     * Stored surfaces only, for the same reason as cssPropertyChecker(): this
+     * runs inside the validation every write tool performs, and building a
+     * surface there would enter builder context mid-save.
      */
     private function styleKeyReader(): \Closure
     {
@@ -181,9 +181,13 @@ final class ElementContext
             try {
                 $surface = $schema->getCachedSurface($type);
 
-                $cache[$type] = $surface === null ? [] : ControlSurface::styleProperties($surface);
+                if ($surface === null) {
+                    return []; // Not remembered: a surface stored later in this request still counts.
+                }
+
+                $cache[$type] = ControlSurface::styleProperties($surface);
             } catch (\Throwable) {
-                $cache[$type] = [];
+                return [];
             }
 
             return $cache[$type];
@@ -201,16 +205,22 @@ final class ElementContext
             }
 
             try {
-                // Cached only: this closure runs inside validation, which write
-                // tools run before saving, and building a surface there would
-                // fire cs_before_late_data mid-save. An uncached type simply
-                // yields no lint until a read path (get_element_schema) has
-                // warmed it.
+                // Stored surfaces only: this closure runs inside validation,
+                // which write tools run before saving, and building a surface
+                // there would fire cs_before_late_data mid-save. A type with no
+                // stored surface yields no lint until get_element_schema,
+                // clear_cache (elements) or `wp pe warm` stores one; from then
+                // on the answer holds until Cornerstone or Pro Extended is
+                // updated, so it does not change from run to run.
                 $surface = $schema->getCachedSurface($type);
 
-                $cache[$type] = $surface === null ? [] : ControlSurface::cssProperties($surface);
+                if ($surface === null) {
+                    return []; // Not remembered: a surface stored later in this request still counts.
+                }
+
+                $cache[$type] = ControlSurface::cssProperties($surface);
             } catch (\Throwable) {
-                $cache[$type] = [];
+                return [];
             }
 
             return $cache[$type];
