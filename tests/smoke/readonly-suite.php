@@ -459,6 +459,43 @@ if ($componentDocId > 0) {
     echo '      codes: ' . wp_json_encode($storedResult['codes'] ?? null) . "\n";
 }
 
+// 23. Native steering (1.5) ---------------------------------------------------------------
+
+S::section('23 native steering');
+
+$resources = (array) (S::rpc('resources/list')['result']['resources'] ?? []);
+$guideEntry = array_values(array_filter($resources, static fn($resource): bool => ($resource['uri'] ?? '') === 'pe://guide/native'));
+S::check(count($guideEntry) === 1 && ($guideEntry[0]['mimeType'] ?? null) === 'text/markdown', 'resources/list has pe://guide/native as markdown');
+$guideText = (string) (S::rpc('resources/read', ['uri' => 'pe://guide/native'])['result']['contents'][0]['text'] ?? '');
+S::check(str_contains($guideText, '## Ground rules') && str_contains($guideText, '### Copyright year'), 'resources/read returns the recipe book');
+S::check(str_contains((string) ($init['result']['instructions'] ?? ''), 'pe://guide/native'), 'the handshake points at the guide');
+
+$bp = pro_extended()->elementContext()->breakpointTag();
+
+// A shortcode this suite registers is site code; a core one is not.
+add_shortcode('pe_smoke_promo', static fn(): string => 'promo');
+$native = S::ok(S::call('validate_layout', ['layout_data' => [
+    ['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_content' => '[pe_smoke_promo] [caption]Photo[/caption]'],
+    ['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_content' => '© 2024 Example. Book before November 1.'],
+    ['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_font_size' => 'inherit', 'text_text_color' => 'inherit', 'text_content' => '<div class="hero"><h2>Hi</h2></div>'],
+]]), 'validate a layout with the native-first patterns');
+remove_shortcode('pe_smoke_promo');
+
+$nativeCodes = (array) ($native['codes'] ?? []);
+$shortcodeIssue = array_values(array_filter((array) ($native['issues'] ?? []), static fn($issue): bool => ($issue['code'] ?? '') === 'custom-shortcode'));
+S::check(($nativeCodes['custom-shortcode'] ?? 0) === 1 && str_contains((string) ($shortcodeIssue[0]['message'] ?? ''), 'readonly-suite.php'), 'custom-shortcode names the file of the suite\'s shortcode and leaves [caption] alone', (string) wp_json_encode($shortcodeIssue));
+S::check(($nativeCodes['hardcoded-date'] ?? 0) === 2, 'hardcoded-date flags the typed year and the promo date', (string) wp_json_encode($nativeCodes));
+S::check(($nativeCodes['html-in-text'] ?? 0) === 1, 'html-in-text flags the pasted design', (string) wp_json_encode($nativeCodes));
+
+// A surface get_element_schema stores gives the same lint on every run.
+S::ok(S::call('get_element_schema', ['element_type' => 'headline', 'search' => 'color']), 'get_element_schema for headline');
+S::check(pro_extended()->schemaExtractor()->getCachedSurface('headline') !== null, 'the headline control surface is stored for the lints');
+$literal = ['layout_data' => [['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_text_color' => '#1a73e8', 'text_text_color_alt' => '#123456', 'text_bg_color' => 'rgba(var(--pe-smoke), 0.5)']]];
+$firstRun = S::ok(S::call('validate_layout', $literal), 'validate literal colours');
+$secondRun = S::ok(S::call('validate_layout', $literal), 'validate them again');
+S::check(($firstRun['codes']['literal-color'] ?? 0) === 2, 'literal-color flags the colour and its _alt twin, not the var() value', (string) wp_json_encode($firstRun['issues'] ?? null));
+S::check(($firstRun['issues'] ?? null) === ($secondRun['issues'] ?? []), 'the same layout gives the same warnings twice');
+
 // Nothing changed ------------------------------------------------------------------------
 
 S::section('nothing was written');
