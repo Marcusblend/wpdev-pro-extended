@@ -31,7 +31,7 @@ final class ClearCache implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Clear Cornerstone caches for a specific post or site-wide. include picks what to clear: tss (compiled CSS), generated_styles (all generated styles and Cornerstone\'s temporary caches), components (component registry), assignments (header/footer/layout assignment rules), host (WP Engine page cache for the post, or all pages plus the object cache). Default: tss with post_id; tss and generated_styles without. The response lists what ran and what was unavailable.';
+        return 'Clear Cornerstone caches for a specific post or site-wide. include picks what to clear: tss (compiled CSS), generated_styles (all generated styles and Cornerstone\'s temporary caches), components (component registry), assignments (header/footer/layout assignment rules), elements (element definitions and the stored control surfaces the style lints read, rebuilt at once for the current Cornerstone version), host (WP Engine page cache for the post, or all pages plus the object cache). Default: tss with post_id; tss and generated_styles without. The response lists what ran and what was unavailable.';
     }
 
     public function inputSchema(): array
@@ -46,7 +46,7 @@ final class ClearCache implements ToolInterface, AnnotatedToolInterface
                 'include' => [
                     'type'        => 'array',
                     'items'       => ['type' => 'string', 'enum' => self::INCLUDES],
-                    'description' => 'Optional. What to clear.',
+                    'description' => 'Optional. What to clear. "elements" also rebuilds the stored control surfaces.',
                 ],
             ],
         ];
@@ -105,10 +105,22 @@ final class ClearCache implements ToolInterface, AnnotatedToolInterface
                     break;
 
                 case 'elements':
-                    // Element definitions and the Inspector control surface are
-                    // cached for an hour; a Cornerstone update changes both.
-                    $this->schema->clearCache();
-                    $ran[] = 'elements: definitions and control surfaces';
+                    // Definitions are cached for an hour; control surfaces are
+                    // stored until Cornerstone or Pro Extended changes version.
+                    // Rebuild the surfaces straight away (a read path) so the
+                    // style lints are never left without them.
+                    $deleted = $this->schema->clearCache();
+                    $warm = $this->schema->warmSurfaces();
+                    $ran[] = sprintf(
+                        'elements: definitions and %d stored control surfaces cleared; %d rebuilt for Cornerstone %s',
+                        $deleted,
+                        count($warm['stored']),
+                        $warm['cornerstone'] !== '' ? $warm['cornerstone'] : '(unknown version)'
+                    );
+
+                    if ($warm['stored'] === []) {
+                        $unavailable[] = 'elements: Cornerstone returned no Inspector data, so no control surfaces were stored; run `wp pe warm` or get_element_schema';
+                    }
                     break;
 
                 case 'host':

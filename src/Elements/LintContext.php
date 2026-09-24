@@ -24,6 +24,9 @@ final class LintContext
      * @param (\Closure(string): ?string)|null   $twigParser        Parses (never renders) a Twig string with the site's
      *                                                              environment: Twig's message when it fails, null when
      *                                                              it parses. Null when there is no environment.
+     * @param (\Closure(string): ?array{origin: string, file: string})|null $shortcodeSource
+     *                                                              Where a shortcode tag is defined (ShortcodeOrigin), or null
+     *                                                              when the tag is not registered. Null when unknown.
      */
     public function __construct(
         public readonly array $migrationVersions = [],
@@ -36,5 +39,6 @@ final class LintContext
         public readonly ?\Closure $styleKeys = null,
         public readonly ?bool $twigEnabled = null,
         public readonly ?\Closure $twigParser = null,
+        public readonly ?\Closure $shortcodeSource = null,
     ) {}
 }

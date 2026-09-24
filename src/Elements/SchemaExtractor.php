@@ -16,12 +16,21 @@ final class SchemaExtractor
     private const CACHE_KEY = 'pe_element_definitions';
     private const CACHE_TTL = HOUR_IN_SECONDS;
 
-    /** One transient per element type, plus an index so they can all be cleared. */
-    private const SURFACE_PREFIX = 'pe_element_surface_';
-    private const SURFACE_INDEX = 'pe_element_surface_index';
+    /**
+     * Transients earlier versions kept surfaces in, one per type plus an
+     * index. Only cleared now; surfaces live in SurfaceStore.
+     */
+    private const LEGACY_SURFACE_INDEX = 'pe_element_surface_index';
 
     /** @var array<string, mixed>|null */
     private static ?array $inspector = null;
+
+    private ?SurfaceStore $surfaces = null;
+
+    public function __construct(?SurfaceStore $surfaces = null)
+    {
+        $this->surfaces = $surfaces;
+    }
 
     /** Stand-in for values that cannot survive serialization. */
     private const UNSERIALIZABLE = '__unserializable_closure__';
@@ -201,64 +210,107 @@ final class SchemaExtractor
     }
 
     /**
-     * The settings an element type really has, grouped the way the builder's
-     * Inspector groups them.
-     *
-     * @return array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>}
-     */
-    /**
-     * The control surface for a type, but only if it is already cached.
+     * The control surface for a type, but only if one is already stored.
      *
      * Building one reaches into Cornerstone's inspector data, which means
      * entering builder context and firing `cs_before_late_data`. That is a read
      * path's business: doing it inside a save marks the save request as a
      * builder request, which is what BuilderContext promises never to do. The
-     * css lint takes this instead, so a cold cache costs it a warning rather
-     * than changing how the save behaves — and a deploy no longer builds a
-     * surface for every element type in the document.
+     * lints take this instead. What they get no longer depends on timing:
+     * a stored surface lasts until Cornerstone or Pro Extended changes version
+     * (see SurfaceStore), so the same layout gives the same warnings every run.
      *
      * @return array<string, mixed>|null
      */
     public function getCachedSurface(string $type): ?array
     {
-        $cached = get_transient(self::SURFACE_PREFIX . md5($type));
-
-        return is_array($cached) ? $cached : null;
+        return $this->surfaces()->get($type);
     }
 
+    /**
+     * The settings an element type really has, grouped the way the builder's
+     * Inspector groups them. Built on a miss and stored, so a read path warms
+     * the lints as a side effect.
+     *
+     * @return array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>}
+     */
     public function getSurface(string $type): array
     {
-        $key = self::SURFACE_PREFIX . md5($type);
-        $cached = get_transient($key);
+        $stored = $this->surfaces()->get($type);
 
-        if (is_array($cached)) {
-            return $cached;
+        if (is_array($stored)) {
+            return $stored;
         }
 
+        return $this->buildAndStore($type) ?? ['panels' => [], 'controls' => []];
+    }
+
+    /**
+     * Build and store the surface of every element type, on a read path.
+     *
+     * For `wp pe warm` and clear_cache (elements). Types the Inspector returns
+     * nothing for are reported rather than stored, so a failed read cannot
+     * pin an empty surface until the next version change.
+     *
+     * @return array{cornerstone: string, stored: string[], empty: string[]}
+     */
+    public function warmSurfaces(): array
+    {
+        $stored = [];
+        $empty = [];
+
+        foreach ($this->getAllDefinitions() as $definition) {
+            $type = is_array($definition) ? (string) ($definition['id'] ?? $definition['name'] ?? '') : '';
+
+            if ($type === '') {
+                continue;
+            }
+
+            $surface = $this->buildAndStore($type);
+
+            if ($surface === null || $surface['controls'] === []) {
+                $empty[] = $type;
+            } else {
+                $stored[] = $type;
+            }
+        }
+
+        return [
+            'cornerstone' => $this->surfaces()->cornerstoneVersion(),
+            'stored'      => $stored,
+            'empty'       => $empty,
+        ];
+    }
+
+    /**
+     * @return array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>}|null
+     */
+    private function buildAndStore(string $type): ?array
+    {
         $inspector = $this->inspectorData()[$type] ?? null;
 
         if (! is_array($inspector)) {
-            return ['panels' => [], 'controls' => []];
+            return null;
         }
 
         $surface = ControlSurface::build($inspector, $this->getDesignations($type), $this->getDefaults($type));
 
-        $index = get_transient(self::SURFACE_INDEX);
-        $index = is_array($index) ? $index : [];
-
-        if (! in_array($key, $index, true)) {
-            $index[] = $key;
+        if ($surface['controls'] === []) {
+            return $surface;
         }
 
-        // The index has to outlive every surface it tracks. Writing it only
-        // when a new key appeared let it expire first: clearCache() then read
-        // an empty index, deleted nothing, reported success, and get_element_schema
-        // kept serving a surface captured before the Cornerstone update. Re-saving
-        // it alongside the surface keeps its TTL at least as long as theirs.
-        set_transient(self::SURFACE_INDEX, $index, self::CACHE_TTL);
-        set_transient($key, $surface, self::CACHE_TTL);
+        try {
+            $this->surfaces()->put($type, $surface);
+        } catch (\Throwable) {
+            // A surface that will not store still answers this request.
+        }
 
         return $surface;
+    }
+
+    private function surfaces(): SurfaceStore
+    {
+        return $this->surfaces ??= SurfaceStore::forSite();
     }
 
     /**
@@ -332,22 +384,27 @@ final class SchemaExtractor
     }
 
     /**
-     * Clear the element definitions cache.
+     * Clear the element definitions cache and every stored control surface.
+     *
+     * @return int How many stored surfaces were deleted.
      */
-    public function clearCache(): void
+    public function clearCache(): int
     {
         delete_transient(self::CACHE_KEY);
 
-        $index = get_transient(self::SURFACE_INDEX);
+        // Surfaces from before they moved to SurfaceStore.
+        $legacy = get_transient(self::LEGACY_SURFACE_INDEX);
 
-        foreach (is_array($index) ? $index : [] as $key) {
+        foreach (is_array($legacy) ? $legacy : [] as $key) {
             if (is_string($key)) {
                 delete_transient($key);
             }
         }
 
-        delete_transient(self::SURFACE_INDEX);
+        delete_transient(self::LEGACY_SURFACE_INDEX);
 
         self::$inspector = null;
+
+        return $this->surfaces()->clear();
     }
 }

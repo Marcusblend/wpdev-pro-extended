@@ -51,6 +51,7 @@ final class Plugin
         $this->layoutCommand()->register();
         $this->mcpCommand()->register();
         $this->doctorCommand()->register();
+        $this->warmCommand()->register();
     }
 
     // ─── Service Accessors (Lazy-loaded) ─────────────────────────────────────
@@ -146,6 +147,13 @@ final class Plugin
     {
         return $this->resolve('commands.doctor', fn() => new Commands\DoctorCommand(
             $this->health(),
+        ));
+    }
+
+    public function warmCommand(): Commands\WarmCommand
+    {
+        return $this->resolve('commands.warm', fn() => new Commands\WarmCommand(
+            $this->schemaExtractor(),
         ));
     }
 

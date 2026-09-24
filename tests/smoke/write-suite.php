@@ -1297,6 +1297,11 @@ if ($lockPageId > 0) {
 
 S::isError(S::call('clear_cache', ['include' => ['everything']]), 'an unknown include is rejected', 'everything');
 
+$elementsClear = S::ok(S::call('clear_cache', ['include' => ['elements']]), 'clear_cache elements');
+$elementsLine = (string) ($elementsClear['ran'][0] ?? '');
+S::check(str_starts_with($elementsLine, 'elements:') && str_contains($elementsLine, 'rebuilt'), 'clear_cache elements clears and rebuilds the stored control surfaces', $elementsLine);
+S::check(pro_extended()->schemaExtractor()->getCachedSurface('headline') !== null, 'the headline surface is stored again straight after');
+
 $menus = S::ok(S::call('list_menus', ['include_items' => true]), 'list_menus');
 S::check(is_array($menus['menus'] ?? null) && ($menus['count'] ?? -1) === count($menus['menus']), 'list_menus returns an array', (string) wp_json_encode($menus));
 
