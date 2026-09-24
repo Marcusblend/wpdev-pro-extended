@@ -1,0 +1,60 @@
+# Element setting keys pe://guide/native cites, each confirmed in Cornerstone 7.9.4 or Cornerstone Forms source (file where the value is defined).
+text_content	includes/elements/values.php (text-standard, text-headline)
+menu	includes/elements/values.php
+menu_active_links_highlight_current	includes/elements/values.php
+menu_active_links_highlight_ancestors	includes/elements/values.php
+bar_sticky	includes/elements/definitions-pro/bar.php
+bar_sticky_hide_initially	includes/elements/definitions-pro/bar.php
+bar_sticky_only_show_on_scroll_up	includes/elements/definitions-pro/bar.php
+bar_sticky_trigger_offset	includes/elements/definitions-pro/bar.php
+bar_sticky_shrink	includes/elements/definitions-pro/bar.php
+bar_sticky_keep_margin	includes/elements/definitions-pro/bar.php
+bar_sticky_z_stack	includes/elements/definitions-pro/bar.php
+hide_bp	includes/elements/values.php
+show_condition	includes/elements/values.php
+custom_atts	includes/elements/values.php
+off_canvas_location	includes/elements/values.php
+toggle_type	includes/elements/values.php
+effects_scroll	includes/elements/values.php
+effects_type_scroll	includes/elements/values.php
+effects_opacity_exit	includes/elements/values.php
+effects_transform_exit	includes/elements/values.php
+effects_opacity_enter	includes/elements/values.php
+effects_transform_enter	includes/elements/values.php
+effects_behavior_scroll	includes/elements/values.php
+effects_duration_scroll	includes/elements/values.php
+effects_delay_scroll	includes/elements/values.php
+effects_offset_top	includes/elements/values.php
+effects_offset_bottom	includes/elements/values.php
+accordion_item_header_content	includes/elements/definitions/accordion-item-elements.php
+accordion_item_content	includes/elements/definitions/accordion-item.php
+accordion_item_starts_open	includes/elements/definitions/accordion-item-elements.php
+accordion_faq_schema	includes/elements/definitions/accordion.php
+tab_label_content	includes/elements/definitions/tab-elements.php
+form_method	plugins/cornerstone-forms/extension/Elements/Form.php
+form_data-cs-ajax	plugins/cornerstone-forms/extension/Elements/Form.php
+form_data-cs-ajax-auto-submit	plugins/cornerstone-forms/extension/Elements/Form.php
+form_data-cs-ajax-selectors	plugins/cornerstone-forms/extension/Elements/Form.php
+looper_provider	includes/elements/values.php
+looper_provider_type	includes/elements/values.php
+looper_provider_dc	includes/elements/values.php
+looper_provider_json	includes/elements/values.php
+looper_provider_query_string	includes/elements/values.php
+looper_consumer	includes/elements/values.php
+section_bg_advanced	includes/elements/definitions/section.php
+layout_div_bg_advanced	includes/elements/definitions/layout-div.php
+raw_content	includes/elements/definitions/raw-content.php
+disable_preview	includes/elements/definitions/raw-content.php
+bg_lower_type	includes/elements/values.php (cs_values('bg-layer', 'bg_lower'): type)
+bg_lower_image	includes/elements/values.php (cs_values('bg-layer', 'bg_lower'): image)
+bg_lower_image_repeat	includes/elements/values.php (cs_values('bg-layer', 'bg_lower'): image_repeat)
+bg_lower_image_size	includes/elements/values.php (cs_values('bg-layer', 'bg_lower'): image_size)
+looper_provider_csv_type	includes/integration/csv.php (LooperProviders::formatKey('csv', 'type'))
+looper_provider_csv_content	includes/integration/csv.php (LooperProviders::formatKey('csv', 'content'))
+name	plugins/cornerstone-forms/extension/Elements/Select.php (form input name)
+group	includes/classes/Services/RuleMatching.php (show_condition rule)
+condition	includes/classes/Services/RuleMatching.php (show_condition rule)
+value	includes/classes/Services/RuleMatching.php (show_condition rule)
+toggle	includes/classes/Services/RuleMatching.php (show_condition rule)
+operand	includes/classes/Services/RuleMatching.php (show_condition rule)
+operator	includes/classes/Services/RuleMatching.php (show_condition rule)

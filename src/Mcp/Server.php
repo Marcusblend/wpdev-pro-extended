@@ -485,6 +485,7 @@ TXT;
             'pe://schema/elements'  => static fn() => new Resources\ElementSchemaResource($schema),
             'pe://schema/hierarchy' => static fn() => new Resources\HierarchyResource($schema),
             'pe://colors/palette'   => static fn() => new Resources\ColorPaletteResource(),
+            'pe://guide/native'     => static fn() => new Resources\NativeGuideResource(),
         ];
 
         foreach ($resources as $uri => $factory) {
