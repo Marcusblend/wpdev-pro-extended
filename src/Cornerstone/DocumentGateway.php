@@ -1296,6 +1296,32 @@ final class DocumentGateway
     }
 
     /**
+     * The option that holds Global JS (Theme Options → JS).
+     *
+     * Asked of Cornerstone (ThemeOptions::get_global_js_key(), filtered by
+     * `cs_global_js_option`, which Pro points at x_custom_scripts) the same
+     * way globalCssKey() asks for the CSS key.
+     */
+    public function globalJsKey(): string
+    {
+        $options = $this->service('ThemeOptions');
+
+        if ($options !== null && method_exists($options, 'get_global_js_key')) {
+            try {
+                $key = $options->get_global_js_key();
+
+                if (is_string($key) && $key !== '') {
+                    return $key;
+                }
+            } catch (\Throwable) {
+                // Use the fallback below.
+            }
+        }
+
+        return 'x_custom_scripts';
+    }
+
+    /**
      * Read a theme option the way Cornerstone does.
      */
     public function getThemeOption(string $key): mixed

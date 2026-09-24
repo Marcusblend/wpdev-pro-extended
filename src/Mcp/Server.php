@@ -443,6 +443,7 @@ TXT;
             'list_components'          => static fn() => new Tools\ListComponents($gateway),
             'get_global_css'           => static fn() => new Tools\GetGlobalCss($gateway),
             'set_global_css'           => static fn() => new Tools\SetGlobalCss($gateway, $backups),
+            'set_global_js'            => static fn() => new Tools\SetGlobalJs($gateway, $backups),
             'set_colors'               => static fn() => new Tools\SetColors($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'set_fonts'                => static fn() => new Tools\SetFonts($gateway, $backups, new ReferenceScanner(new ThemeOptionsReader())),
             'upload_media'             => static fn() => new Tools\UploadMedia(new MediaImporter()),
