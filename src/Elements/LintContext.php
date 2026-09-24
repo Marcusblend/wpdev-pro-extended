@@ -18,6 +18,8 @@ final class LintContext
      *                                                              csv, external_api, woocommerce. A missing key is not checked.
      * @param (\Closure(string): ?bool)|null     $conditionExists   Whether a condition rule name resolves; null when unknown.
      * @param (\Closure(string): ?bool)|null     $looperExists      Whether a looper provider type is registered; null when unknown.
+     * @param (\Closure(string): array<string, string>)|null $cssProperties CSS property => the element key that sets it.
+     * @param (\Closure(string): array<string, string>)|null $styleKeys     Element key => the CSS property it sets.
      */
     public function __construct(
         public readonly array $migrationVersions = [],
@@ -27,5 +29,6 @@ final class LintContext
         public readonly ?\Closure $conditionExists = null,
         public readonly ?\Closure $looperExists = null,
         public readonly ?\Closure $cssProperties = null,
+        public readonly ?\Closure $styleKeys = null,
     ) {}
 }

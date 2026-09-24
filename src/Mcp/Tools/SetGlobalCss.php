@@ -28,7 +28,7 @@ final class SetGlobalCss implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Edit Global CSS (Theme Options → CSS) through named blocks Pro Extended manages (/* pe:begin <name> */ … /* pe:end <name> */). upsert_block creates or replaces a block, remove_block deletes one; CSS outside the blocks is never changed. replace_all replaces the whole stylesheet and needs confirm_replace_all: true. Refuses unbalanced braces/comments, "</style", "<script", "<?" and marker text; warns on backgrounds without a text color, remote @import and heavy !important use. Returns a diff, sizes and a backup_id. Run with dry_run: true first.';
+        return 'Last resort for styling: check get_element_schema first and set the element\'s own keys, which stay editable in the builder and can be bound to a parameter or global variable. Use this for what no element setting covers — site-wide rules, selectors that cross elements, @media or @supports blocks. Edit Global CSS (Theme Options → CSS) through named blocks Pro Extended manages (/* pe:begin <name> */ … /* pe:end <name> */). upsert_block creates or replaces a block, remove_block deletes one; CSS outside the blocks is never changed. replace_all replaces the whole stylesheet and needs confirm_replace_all: true. Refuses unbalanced braces/comments, "</style", "<script", "<?" and marker text; warns on backgrounds without a text color, remote @import and heavy !important use. Returns a diff, sizes and a backup_id. Run with dry_run: true first.';
     }
 
     public function inputSchema(): array

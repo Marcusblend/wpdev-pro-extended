@@ -149,6 +149,7 @@ final class ElementContext
             $this->conditionChecker(),
             $this->looperChecker(),
             $this->cssPropertyChecker(),
+            $this->styleKeyReader(),
         );
     }
 
@@ -158,6 +159,35 @@ final class ElementContext
      * Reads the Inspector control surface once per type and remembers it, so a
      * page full of headlines costs one lookup.
      */
+    /**
+     * What each of an element type's style keys sets, for the token lints.
+     *
+     * Cached only, for the same reason as cssPropertyChecker(): this runs
+     * inside the validation every write tool performs, and building a surface
+     * there would enter builder context mid-save.
+     */
+    private function styleKeyReader(): \Closure
+    {
+        $cache = [];
+        $schema = $this->schema;
+
+        return static function (string $type) use (&$cache, $schema): array {
+            if (array_key_exists($type, $cache)) {
+                return $cache[$type];
+            }
+
+            try {
+                $surface = $schema->getCachedSurface($type);
+
+                $cache[$type] = $surface === null ? [] : ControlSurface::styleProperties($surface);
+            } catch (\Throwable) {
+                $cache[$type] = [];
+            }
+
+            return $cache[$type];
+        };
+    }
+
     private function cssPropertyChecker(): \Closure
     {
         $cache = [];

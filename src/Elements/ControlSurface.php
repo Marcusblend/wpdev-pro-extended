@@ -401,6 +401,54 @@ final class ControlSurface
 
 
     /**
+     * Every style key the element writes, and the CSS property it sets.
+     *
+     * `cssProperties()` answers "which key sets this property", keeping one key
+     * per property because that is what naming an alternative to a css
+     * declaration needs. This is the other direction and keeps them all, so a
+     * caller can ask what an element's stored value for a given key means —
+     * which is how a hard-coded colour is told apart from a palette reference.
+     *
+     * @param  array<string, mixed>  $surface
+     * @return array<string, string> Element key => CSS property.
+     */
+    public static function styleProperties(array $surface): array
+    {
+        $keys = [];
+
+        foreach ($surface['controls'] as $control) {
+            $designations = (array) ($control['designations'] ?? []);
+            $type = (string) ($control['type'] ?? '');
+
+            if (array_key_exists($type, self::NAMED_KEY_PREFIX)) {
+                foreach ((array) ($control['named_keys'] ?? []) as $name => $key) {
+                    $property = self::property(self::NAMED_KEY_PREFIX[$type] . (string) $name);
+
+                    if ($property !== null && self::isStyle((string) $key, $designations)) {
+                        $keys[(string) $key] ??= $property;
+                    }
+                }
+            }
+
+            foreach ((array) ($control['keys'] ?? []) as $key) {
+                $key = (string) $key;
+
+                if (! self::isStyle($key, $designations)) {
+                    continue;
+                }
+
+                $property = self::propertyFromKey($key);
+
+                if ($property !== null) {
+                    $keys[$key] ??= $property;
+                }
+            }
+        }
+
+        return $keys;
+    }
+
+    /**
      * CSS properties this element already has a native control for.
      *
      * The answer to "is there a setting for this, or do I have to write CSS?".

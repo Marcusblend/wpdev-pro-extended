@@ -47,6 +47,8 @@ final class ElementLint
         'nested-link'               => 'A container link inside another link renders as a span; browsers do not allow nested links.',
         'background-layers-off'     => 'Background layers are set but the element\'s advanced background switch is off, so they do not render.',
         'css-over-control'          => 'A css declaration sets a property the element already has a setting for; the setting is editable in the builder and can be bound to a parameter or global variable, a css block cannot.',
+        'literal-color'             => 'A colour setting holds a literal value rather than a palette reference, so it keeps a copy of the colour and stops following the palette.',
+        'literal-font-family'       => 'A font family setting holds a literal stack rather than a global font reference, so it stops following the site\'s fonts.',
     ];
 
     /** What a missing _m changes, by type. */
@@ -70,6 +72,9 @@ final class ElementLint
     private const LAYOUT_MIGRATION_TYPES = ['layout-grid', 'layout-row', 'layout-cell'];
 
     private const INTERNAL_TYPES = ['root', 'region', 'undefined'];
+
+    /** Colour properties a palette reference is the right answer for. */
+    private const TOKENED_COLOR_PROPERTIES = ['color', 'background-color', 'border-color'];
 
     private const LEGACY_V2_TYPES = ['row', 'column'];
 
@@ -260,6 +265,7 @@ final class ElementLint
         $this->checkLink($element, $type, $insideLink, $add);
         $this->checkLayers($element, $type, $add);
         $this->checkCss($element, $type, $add);
+        $this->checkLiteralValues($element, $type, $add);
     }
 
     private function checkType(string $type, \Closure $add): void
@@ -813,5 +819,101 @@ final class ElementLint
         $text = (string) preg_replace('/\s+/', ' ', $text);
 
         return strlen($text) > 60 ? substr($text, 0, 57) . '...' : $text;
+    }
+
+    /**
+     * Colour and font settings that hold a value instead of a reference.
+     *
+     * Filling an element's own setting is the right move — it stays editable in
+     * the builder — but a hard-coded "#1a73e8" in that setting is only half of
+     * it: the element now carries its own copy of the brand colour, and
+     * retuning the palette leaves it behind. A palette or font reference keeps
+     * the element following the global, which is what the globals are for.
+     *
+     * Only the properties a design system actually governs are checked. Font
+     * weight is deliberately left out: an element being 700 is usually its own
+     * decision rather than a token, and warning on every numeric weight would
+     * bury the two that matter. Shadows and gradients are untouched for the
+     * same reason — they set box-shadow and background-image, not these.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function checkLiteralValues(array $element, string $type, \Closure $add): void
+    {
+        if ($this->context->styleKeys === null) {
+            return;
+        }
+
+        $keys = ($this->context->styleKeys)($type);
+
+        if (! is_array($keys) || $keys === []) {
+            return;
+        }
+
+        foreach ($keys as $key => $property) {
+            $value = $element[$key] ?? null;
+
+            if (! is_string($value)) {
+                continue;
+            }
+
+            $value = trim($value);
+
+            if ($value === '' || self::isReferenceOrKeyword($value)) {
+                continue;
+            }
+
+            if (in_array($property, self::TOKENED_COLOR_PROPERTIES, true) && self::isLiteralColor($value)) {
+                $add('literal-color', sprintf(
+                    '%s is the literal colour %s. A palette reference — "global-color:<id>", or "global-color:<id>:0.5" for alpha — follows the palette instead of keeping a copy of it. list_colors has the ids.',
+                    $key,
+                    $value
+                ));
+
+                continue;
+            }
+
+            if ($property === 'font-family') {
+                $add('literal-font-family', sprintf(
+                    '%s is the literal font stack %s. "global-ff:<id>" follows the site\'s fonts instead. list_fonts has the ids.',
+                    $key,
+                    strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value
+                ));
+            }
+        }
+    }
+
+    /**
+     * Whether a value already points at something rather than stating it.
+     */
+    private static function isReferenceOrKeyword(string $value): bool
+    {
+        foreach (['global-color:', 'global-ff:', 'global-fw:'] as $reference) {
+            if (str_starts_with($value, $reference)) {
+                return true;
+            }
+        }
+
+        // A CSS custom property, or a Dynamic Content token that resolves later.
+        if (stripos($value, 'var(') === 0 || str_contains($value, '{{')) {
+            return true;
+        }
+
+        return in_array(strtolower($value), [
+            'inherit', 'initial', 'unset', 'revert', 'none', 'auto', 'transparent', 'currentcolor',
+        ], true);
+    }
+
+    /**
+     * Hex, rgb() and hsl() only — the forms that are unambiguously a colour.
+     *
+     * A bare word is not treated as a named colour: too many settings take a
+     * keyword that happens to be spellable as one, and a false warning on a
+     * lint like this is worse than a missed one.
+     */
+    private static function isLiteralColor(string $value): bool
+    {
+        return preg_match('/^#[0-9a-f]{3,8}$/i', $value) === 1
+            || preg_match('/^(rgba?|hsla?)\s*\(/i', $value) === 1;
     }
 }

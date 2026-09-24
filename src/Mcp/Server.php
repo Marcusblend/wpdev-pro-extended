@@ -60,6 +60,8 @@ Pro Extended reads and writes Cornerstone (Pro theme) sites.
 - Every write backs up first: undo layout writes with restore_layout and settings writes with restore_settings.
 - Never pass skip_validation or skip_backup.
 - Run every set_* tool with dry_run: true first and review what would change.
+- Style elements through their own settings, not CSS. Call get_element_schema for the element type: it returns the settings the builder's Inspector shows, with the key each control writes. Set those keys. Reach for a css key or set_global_css only for what no setting covers — a setting stays editable in the builder and can be bound to a parameter or a global variable, and a css block can do neither.
+- Put references in those settings rather than values. A hard-coded "#1a73e8" or font stack stops following the globals the moment they are retuned; "global-color:<_id>" and "global-ff:<_id>" keep it. Read the ids from list_colors and list_fonts, and add what is missing with set_colors and set_fonts.
 - References inside layouts: colors "global-color:<_id>" (with alpha "global-color:<_id>:0.5"), font family "global-ff:<_id>", font weight "global-fw:<_id>|fw-normal" or "global-fw:<_id>|fw-bold", images "<attachment_id>:full", menus "menu:<term_id>".
 - Call list_components before composing component instances ({"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}).
 - For large documents call get_layout with summary: true first, then fetch one subtree with path.

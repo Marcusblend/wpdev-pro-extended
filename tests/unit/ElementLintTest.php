@@ -145,6 +145,76 @@ T::same([], $codesOf($withSurface->tree([$blank])), 'empty css is not reported')
 
 T::same([], $codesOf($lint->tree([$styled])), 'without a registry the check stays quiet');
 
+
+// literal-color and literal-font-family need a site that can say what each of
+// an element's keys sets.
+
+$withKeys = new ElementLint(new LintContext(
+    ['text' => 1],
+    '4_4',
+    [],
+    [],
+    null,
+    null,
+    null,
+    static fn (string $type): array => $type === 'headline'
+        ? [
+            'text_text_color'   => 'color',
+            'text_bg_color'     => 'background-color',
+            'text_font_family'  => 'font-family',
+            'text_font_weight'  => 'font-weight',
+            'text_box_shadow'   => 'box-shadow',
+        ]
+        : [],
+));
+
+$hard = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_text_color' => '#1a73e8'];
+$issues = $withKeys->tree([$hard]);
+T::same(['literal-color'], $codesOf($issues), 'literal-color: a hex in a colour setting');
+T::ok(str_contains($issues[0]['message'], 'global-color:'), 'the message names the reference form');
+$seen['literal-color'] = true;
+
+$stack = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => '"Barlow Condensed", sans-serif'];
+$issues = $withKeys->tree([$stack]);
+T::same(['literal-font-family'], $codesOf($issues), 'literal-font-family: a stack in a font setting');
+T::ok(str_contains($issues[0]['message'], 'global-ff:'), 'the message names the reference form');
+$seen['literal-font-family'] = true;
+
+$rgba = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_bg_color' => 'rgba(0, 0, 0, 0.4)'];
+T::same(['literal-color'], $codesOf($withKeys->tree([$rgba])), 'an rgba background is a literal too');
+
+$referenced = [
+    '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',
+    'text_text_color'  => 'global-color:brand',
+    'text_bg_color'    => 'global-color:surface:0.5',
+    'text_font_family' => 'global-ff:heading',
+];
+T::same([], $codesOf($withKeys->tree([$referenced])), 'a reference is what the lint is asking for');
+
+$keywords = [
+    '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',
+    'text_text_color' => 'inherit',
+    'text_bg_color'   => 'transparent',
+];
+T::same([], $codesOf($withKeys->tree([$keywords])), 'a keyword is not a hard-coded colour');
+
+$variable = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_text_color' => 'var(--brand)'];
+T::same([], $codesOf($withKeys->tree([$variable])), 'a global variable is already a reference');
+
+$token = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_text_color' => '{{dc:p:brand}}'];
+T::same([], $codesOf($withKeys->tree([$token])), 'a dynamic content token resolves later');
+
+$weight = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_weight' => '700'];
+T::same([], $codesOf($withKeys->tree([$weight])), 'font weight is deliberately not tokenized');
+
+$shadow = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_box_shadow' => '0 1px 2px rgba(0,0,0,.2)'];
+T::same([], $codesOf($withKeys->tree([$shadow])), 'a shadow is not a colour setting');
+
+$unknown = ['_type' => 'section', '_m' => ['e' => 2], '_bp_base' => '4_4', 'text_text_color' => '#fff'];
+T::same([], $codesOf($withKeys->tree([$unknown])), 'an element the registry cannot describe is left alone');
+
+T::same([], $codesOf($lint->tree([$hard])), 'without a registry the token checks stay quiet');
+
 T::same([], array_values(array_diff(array_keys(ElementLint::CODES), array_keys($seen))), 'every code has a fixture');
 
 // Things that must not warn.
