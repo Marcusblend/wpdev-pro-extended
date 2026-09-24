@@ -62,3 +62,78 @@ T::same([], $bad['added'], 'and adds nothing');
 T::same(['https://a.example.com/', 'https://b.example.com/v2/'], ApiAllowlist::parse($stored), 'parsing splits on newlines');
 T::same($stored, ApiAllowlist::encode(ApiAllowlist::parse($stored)), 'and encoding puts it back');
 T::same([], ApiAllowlist::parse("\n  \n"), 'blank lines are dropped');
+
+// Hosts inside the site's own network -----------------------------------------
+
+foreach ([
+    'https://localhost/'                  => 'localhost',
+    'https://LOCALHOST./api'              => 'localhost with a trailing dot',
+    'https://admin.localhost/'            => 'a .localhost name',
+    'https://127.0.0.1/'                  => 'IPv4 loopback',
+    'https://127.8.9.10:8443/v1'          => 'anywhere in 127/8',
+    'https://10.0.0.5/'                   => 'RFC 1918 10/8',
+    'https://172.16.0.1/'                 => 'RFC 1918 172.16/12, low end',
+    'https://172.31.255.254/'             => 'RFC 1918 172.16/12, high end',
+    'https://192.168.1.1/'                => 'RFC 1918 192.168/16',
+    'https://169.254.169.254/latest/'     => 'link-local, the metadata service',
+    'https://0.0.0.0/'                    => 'this host',
+    'https://[::1]/'                      => 'IPv6 loopback',
+    'https://[::]/'                       => 'the unspecified IPv6 address',
+    'https://[fe80::1]/'                  => 'IPv6 link-local',
+    'https://[fd12:3456:789a::1]/'        => 'IPv6 unique local',
+    'https://[fc00::1]/'                  => 'IPv6 unique local, fc00',
+    'https://[::ffff:127.0.0.1]/'         => 'IPv4 loopback written as IPv6',
+    'https://[::ffff:10.1.2.3]/'          => 'a private IPv4 address written as IPv6',
+    'https://2130706433/'                 => '127.0.0.1 as one number',
+    'https://127.1/'                      => '127.0.0.1 shortened',
+    'https://0x7f.0.0.1/'                 => '127.0.0.1 in hex',
+] as $entry => $why) {
+    $errors = [];
+    T::same(null, ApiAllowlist::normalize($entry, $errors), sprintf('"%s" is refused (%s)', $entry, $why));
+    T::same(1, count($errors), sprintf('and says why (%s)', $why));
+}
+
+foreach ([
+    'https://172.15.0.1/'     => 'https://172.15.0.1/',
+    'https://172.32.0.1/'     => 'https://172.32.0.1/',
+    'https://8.8.8.8/dns/'    => 'https://8.8.8.8/dns/',
+    'https://[2001:db8::1]/'  => 'https://[2001:db8::1]/',
+    'https://localhost.example.com/' => 'https://localhost.example.com/',
+    'https://10.example.com/' => 'https://10.example.com/',
+    'https://api.example.com/users/@me' => 'https://api.example.com/users/@me/',
+] as $entry => $expected) {
+    $errors = [];
+    T::same($expected, ApiAllowlist::normalize($entry, $errors), sprintf('"%s" is a public host and is allowed', $entry));
+}
+
+// User information is refused, not stripped -------------------------------------
+
+foreach (['https://user@api.example.com/', 'https://user:secret@api.example.com/', 'https://api.example.com@evil.example.net/', 'https://@api.example.com/'] as $entry) {
+    $errors = [];
+    T::same(null, ApiAllowlist::normalize($entry, $errors), sprintf('"%s" is refused rather than stripped', $entry));
+    T::ok(str_contains($errors[0] ?? '', 'user name or password'), 'and the message says why');
+}
+
+// Failing closed ---------------------------------------------------------------
+
+$single = 'https://a.example.com/';
+
+$emptied = ApiAllowlist::plan($single, [], ['https://a.example.com/'], true);
+T::same(1, count($emptied['errors']), 'removing the last entry while the External API is on is an error');
+T::ok(str_contains($emptied['errors'][0], 'allow every URL'), 'which says an empty list allows everything');
+
+$off = ApiAllowlist::plan($single, [], ['https://a.example.com/'], false);
+T::same([], $off['errors'], 'with the feature off the list may be emptied');
+
+$swapped = ApiAllowlist::plan($single, ['https://b.example.com/'], ['https://a.example.com/'], true);
+T::same([], $swapped['errors'], 'replacing the last entry in one call is fine');
+T::same(['https://b.example.com/'], $swapped['entries'], 'and leaves the new one');
+
+$stillEmpty = ApiAllowlist::plan('', [], ['https://nothere.example.com/'], true);
+T::same(1, count($stillEmpty['errors']), 'a change that leaves an empty list empty is refused while the feature is on');
+
+$filled = ApiAllowlist::plan('', ['https://a.example.com'], [], true);
+T::same([], $filled['errors'], 'and filling it is how to fix that');
+
+$badOnly = ApiAllowlist::plan($single, ['https://localhost/'], ['https://a.example.com/'], true);
+T::same(2, count($badOnly['errors']), 'a refused addition does not count towards keeping the list filled');
