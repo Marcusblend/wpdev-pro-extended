@@ -56,14 +56,22 @@ final class Server
     private const ERR_INTERNAL    = -32603;
 
     private const INSTRUCTIONS = <<<'TXT'
-Pro Extended reads and writes Cornerstone (Pro theme) sites.
-- Every write backs up first: undo layout writes with restore_layout and settings writes with restore_settings.
-- Never pass skip_validation or skip_backup.
-- Run every set_* tool with dry_run: true first and review what would change.
-- Style elements through their own settings, not CSS. Call get_element_schema for the element type: it returns the settings the builder's Inspector shows, with the key each control writes. Set those keys. Reach for a css key or set_global_css only for what no setting covers — a setting stays editable in the builder and can be bound to a parameter or a global variable, and a css block can do neither.
-- Put references in those settings rather than values. A hard-coded "#1a73e8" or font stack stops following the globals the moment they are retuned; "global-color:<_id>" and "global-ff:<_id>" keep it. Read the ids from list_colors and list_fonts, and add what is missing with set_colors and set_fonts.
-- References inside layouts: colors "global-color:<_id>" (with alpha "global-color:<_id>:0.5"), font family "global-ff:<_id>", font weight "global-fw:<_id>|fw-normal" or "global-fw:<_id>|fw-bold", images "<attachment_id>:full", menus "menu:<term_id>".
-- Call list_components before composing component instances ({"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}).
+Pro Extended reads and writes Cornerstone (Pro theme) sites. Build everything with Cornerstone's own features. Never write PHP, a plugin, an mu-plugin, functions.php code, a custom shortcode or wp_head output for a site. If a need seems to require one, stop and tell the user which native feature falls short.
+
+Use the first of these that does the job:
+1. The element's own setting. get_element_schema lists the Inspector's controls and the key each one writes.
+2. A global reference in that setting: "global-color:<_id>" (with alpha "global-color:<_id>:0.5"), "global-ff:<_id>", "global-fw:<_id>|fw-normal", or a Global Variable as var(--name). Read ids with list_colors and list_fonts; add them with set_colors, set_fonts and set_variables. Self-hosted fonts: upload_media, then set_fonts with config.customFontItems.
+3. Reuse: a component with parameters (list_components before composing instances). Site-wide values the client edits: Global Parameters (set_global_parameters).
+4. Data and logic: Dynamic Content tokens for data, Twig for arithmetic, dates and branching (get_site_info features.twig must be on). get_native_reference lists the tokens and the Twig functions and filters.
+5. Visibility: show conditions; assignments for headers, footers and single/archive layouts. get_native_reference lists the rules.
+6. Anything that repeats: a looper. get_native_reference lists the providers and their fields.
+7. Behaviour: native elements and effects — sticky header bars, off-canvas or collapsed navigation on a WordPress menu, accordion, tabs, scroll effects, Cornerstone Forms.
+8. Last resort: set_global_css for rules no setting covers; set_global_js or a Code element for the few lines of script nothing above can do.
+pe://guide/native has worked recipes for common needs.
+
+- Check every Dynamic Content token, Twig string, condition and looper with render_preview before saving, and run validate_layout.
+- Every write backs up first: undo layout writes with restore_layout and settings writes with restore_settings. Never pass skip_validation or skip_backup. Run every set_* tool with dry_run: true first.
+- References inside layouts: images "<attachment_id>:full", menus "menu:<term_id>", component instances {"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}.
 - For large documents call get_layout with summary: true first, then fetch one subtree with path.
 TXT;
 
