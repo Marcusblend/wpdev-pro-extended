@@ -74,7 +74,7 @@ final class NativeReference
     private function build(string $section): array
     {
         return match ($section) {
-            'dynamic_content' => $this->dynamicContent->all(),
+            'dynamic_content' => $this->dynamicContentSection(),
             'twig'            => (new TwigCatalog())->read($this->dynamicContent),
             'conditions'      => $this->conditions(),
             'loopers'         => (new LooperCatalog())->read($this->dynamicContent)
@@ -82,6 +82,20 @@ final class NativeReference
             'parameter_types' => $this->parameterTypes(),
             'regions'         => $this->regions(),
         };
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function dynamicContentSection(): array
+    {
+        $catalog = $this->dynamicContent->all();
+
+        if ($catalog['groups'] === [] && $catalog['fields'] === []) {
+            return $catalog + ['unavailable' => 'This site returned no Dynamic Content registry (DynamicContent::get_dynamic_fields).'];
+        }
+
+        return $catalog;
     }
 
     /**

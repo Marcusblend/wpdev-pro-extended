@@ -102,10 +102,6 @@ final class GetNativeReference implements ToolInterface, AnnotatedToolInterface
         switch ($section) {
             case 'dynamic_content':
                 $result += ListDynamicContent::present($data, $arguments);
-
-                if (($data['groups'] ?? []) === [] && ($data['fields'] ?? []) === []) {
-                    $result['unavailable'] = 'This site returned no Dynamic Content registry.';
-                }
                 break;
 
             case 'twig':
