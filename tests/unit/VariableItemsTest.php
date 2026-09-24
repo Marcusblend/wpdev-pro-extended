@@ -63,6 +63,43 @@ T::same(['brand'], $removed['removed'], 'a stored name is removed');
 T::same(1, count($removed['items']), 'and leaves the rest');
 T::same([], VariableItems::merge($stored, [], ['nothere'])['removed'], 'removing a name that is not there is quiet');
 
+// Stored items the call does not touch ------------------------------------------
+
+$odd = [
+    ['id' => 'brand', 'value' => '#0a7d4b'],
+    ['id' => '9lead', 'value' => '1px', 'note' => ['kept' => true]],
+    ['id' => '--spacing', 'value' => '1rem', '_bp' => ['value' => ['1rem', '0.5rem']]],
+    'not an item',
+    ['value' => 'no id at all'],
+    ['id' => 'brand', 'value' => '#111111'],
+    ['id' => 'has space', 'value' => 'x'],
+];
+
+$unrelated = VariableItems::merge($odd, ['accent' => 'red']);
+T::same([], $unrelated['errors'], 'an unrelated write is not refused over stored names the pattern rejects');
+T::same(count($odd) + 1, count($unrelated['items']), 'nothing stored is dropped');
+T::same(serialize(array_slice($odd, 0, count($odd))), serialize(array_slice($unrelated['items'], 0, count($odd))), 'every stored item survives byte-identical, in its place');
+T::same(['id' => 'accent', 'value' => 'red'], $unrelated['items'][count($odd)], 'and the new one is added after them');
+
+$renamedNot = VariableItems::merge($odd, ['spacing' => '2rem']);
+T::same('--spacing', $renamedNot['items'][2]['id'], 'a stored name with a leading "--" keeps its spelling when its value changes');
+T::same('2rem', $renamedNot['items'][2]['value'], 'and takes the new value');
+T::same(['1rem', '0.5rem'], $renamedNot['items'][2]['_bp']['value'], 'and keeps its breakpoints');
+T::same(['spacing'], $renamedNot['changed'], 'it is reported by its name');
+T::same($odd[1], $renamedNot['items'][1], 'while the item the pattern rejects is untouched');
+
+$both = VariableItems::merge($odd, ['brand' => '#222222']);
+T::same('#222222', $both['items'][0]['value'], 'a duplicated name is changed where it first appears');
+T::same('#222222', $both['items'][5]['value'], 'and where it appears again, so the two cannot disagree');
+T::same(['brand'], $both['changed'], 'and reported once');
+
+$dropBrand = VariableItems::merge($odd, [], ['brand']);
+T::same(count($odd) - 2, count($dropBrand['items']), 'removing a name removes every item that carries it');
+T::same($odd[1], $dropBrand['items'][0], 'and nothing else');
+
+$badNew = VariableItems::merge($odd, ['also bad' => 'x']);
+T::same(1, count($badNew['errors']), 'a name the pattern rejects is still refused when it is being added');
+
 T::group('GlobalParameters');
 
 // The _bp_base trap ---------------------------------------------------------

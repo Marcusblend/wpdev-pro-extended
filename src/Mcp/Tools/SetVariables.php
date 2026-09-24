@@ -81,13 +81,15 @@ final class SetVariables implements ToolInterface, AnnotatedToolInterface
             'changed'   => $merged['changed'],
             'removed'   => $merged['removed'],
             'count'     => count($merged['items']),
-            'variables' => array_map(static fn (array $item): array => [
+            // Stored items this plugin cannot read are kept and counted, but
+            // there is nothing to report for them.
+            'variables' => array_values(array_map(static fn (array $item): array => [
                 'id'        => (string) $item['id'],
-                'value'     => (string) ($item['value'] ?? ''),
+                'value'     => is_scalar($item['value'] ?? null) ? (string) $item['value'] : '',
                 'property'  => VariableItems::property((string) $item['id']),
                 'reference' => VariableItems::reference((string) $item['id']),
                 'responsive' => isset($item['_bp']['value']),
-            ], $merged['items']),
+            ], array_filter($merged['items'], static fn (mixed $item): bool => is_array($item) && is_scalar($item['id'] ?? null)))),
         ];
 
         if ($merged['added'] === [] && $merged['changed'] === [] && $merged['removed'] === []) {
