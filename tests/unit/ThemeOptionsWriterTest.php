@@ -62,3 +62,14 @@ $mixed = ThemeOptionsWriter::plan(
 );
 T::same(2, count($mixed['errors']), 'every bad key is reported');
 T::same(1, count($mixed['writes']), 'and the good one is still planned, for the caller to refuse on');
+
+// Where the refused keys are written instead --------------------------------------
+
+foreach (['x_custom_scripts', 'cs_v1_custom_js'] as $script) {
+    T::ok(str_contains(ThemeOptionsWriter::REFUSED[$script], 'set_global_js'), sprintf('"%s" is pointed at set_global_js', $script));
+    T::ok(! str_contains(ThemeOptionsWriter::REFUSED[$script], 'set_global_css'), sprintf('not at set_global_css, which does not write JS (%s)', $script));
+}
+
+foreach (['x_custom_styles', 'cs_v1_custom_css'] as $style) {
+    T::ok(str_contains(ThemeOptionsWriter::REFUSED[$style], 'set_global_css'), sprintf('"%s" is still pointed at set_global_css', $style));
+}
