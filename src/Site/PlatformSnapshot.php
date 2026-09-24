@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace ProExtended\Site;
 
+use ProExtended\Cornerstone\ConditionCatalog;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
+use ProExtended\Cornerstone\LooperCatalog;
+use ProExtended\Cornerstone\ParameterTypeCatalog;
+use ProExtended\Cornerstone\TwigCatalog;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Settings\ThemeOptionsReader;
 
@@ -40,10 +44,64 @@ final class PlatformSnapshot
             'element_types'          => $this->elementTypes(),
             'migrations'             => $this->elements->migrationVersions(),
             'document_types'         => $this->documentTypes(),
+            ...$this->nativeFingerprints(),
             'theme_option_keys'      => $this->themeOptionKeys(),
             'dynamic_content_groups' => $this->dynamicContentGroups(),
             'looper_types'           => $this->looperTypes(),
             'permissions'            => array_keys(Features::permissions()),
+        ];
+    }
+
+    /**
+     * The native registries get_native_reference reads, reduced to names so a
+     * Themeco release that adds or drops a Twig function or filter, a
+     * condition rule, a looper provider or a parameter type shows as drift.
+     * A registry that cannot be read is null (Twig is null while it is off),
+     * and PlatformBaseline does not compare a null side.
+     *
+     * @return array<string, string[]|null>
+     */
+    public function nativeFingerprints(): array
+    {
+        $twig = null;
+        $rules = null;
+        $loopers = null;
+        $parameters = null;
+
+        try {
+            $twig = TwigCatalog::fingerprint();
+        } catch (\Throwable) {
+            $twig = null;
+        }
+
+        try {
+            $conditions = (new ConditionCatalog())->read();
+            $all = array_merge($conditions['show_conditions']['rules'] ?? [], $conditions['assignments']['rules'] ?? []);
+            $rules = $all === [] ? null : ConditionCatalog::fingerprint($all);
+        } catch (\Throwable) {
+            $rules = null;
+        }
+
+        try {
+            $loopers = (new LooperCatalog())->providerIds();
+        } catch (\Throwable) {
+            $loopers = null;
+        }
+
+        try {
+            $managed = (new ParameterTypeCatalog())->managed();
+            $parameters = $managed === null ? null : ParameterTypeCatalog::fingerprint($managed);
+        } catch (\Throwable) {
+            $parameters = null;
+        }
+
+        return [
+            'twig_functions'   => $twig['functions'] ?? null,
+            'twig_filters'     => $twig['filters'] ?? null,
+            'twig_tests'       => $twig['tests'] ?? null,
+            'condition_rules'  => $rules,
+            'looper_providers' => $loopers,
+            'parameter_types'  => $parameters,
         ];
     }
 
