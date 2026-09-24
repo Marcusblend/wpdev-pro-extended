@@ -215,7 +215,8 @@ T::same([], $codesOf($withKeys->tree([$unknown])), 'an element the registry cann
 
 T::same([], $codesOf($lint->tree([$hard])), 'without a registry the token checks stay quiet');
 
-T::same([], array_values(array_diff(array_keys(ElementLint::CODES), array_keys($seen))), 'every code has a fixture');
+// The native-first codes have their fixtures in NativeLintTest.php.
+T::same([], array_values(array_diff(array_keys(ElementLint::CODES), array_keys(ElementLint::NATIVE_CODES), array_keys($seen))), 'every code has a fixture');
 
 // Things that must not warn.
 $quiet = [

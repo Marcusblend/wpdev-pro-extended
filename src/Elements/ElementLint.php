@@ -49,6 +49,16 @@ final class ElementLint
         'css-over-control'          => 'A css declaration sets a property the element already has a setting for; the setting is editable in the builder and can be bound to a parameter or global variable, a css block cannot.',
         'literal-color'             => 'A colour setting holds a literal value rather than a palette reference, so it keeps a copy of the colour and stops following the palette.',
         'literal-font-family'       => 'A font family setting holds a literal stack rather than a global font reference, so it stops following the site\'s fonts.',
+    ] + self::NATIVE_CODES;
+
+    /**
+     * Codes that point a build back to a native feature (1.5). Kept apart
+     * from the data checks above so other groups of codes can sit beside them.
+     */
+    public const NATIVE_CODES = [
+        'custom-shortcode' => 'Element text uses a shortcode whose callback is defined outside WordPress core, Pro/Cornerstone and Themeco extensions, so the page depends on site code; Dynamic Content or Twig does the same natively.',
+        'hardcoded-date'   => 'A typed year beside © or "Copyright", or a typed date in promotional copy, which goes stale; Dynamic Content, Twig or a Global Parameter with a condition keeps it current.',
+        'html-in-text'     => 'A Text or Headline element holds block-level HTML with its own typography switched off (all inherit, or display: contents): a pasted design rather than elements the builder can edit.',
     ];
 
     /** What a missing _m changes, by type. */
@@ -266,6 +276,7 @@ final class ElementLint
         $this->checkLayers($element, $type, $add);
         $this->checkCss($element, $type, $add);
         $this->checkLiteralValues($element, $type, $add);
+        $this->checkNative($element, $type, $add);
     }
 
     private function checkType(string $type, \Closure $add): void
@@ -915,5 +926,244 @@ final class ElementLint
     {
         return preg_match('/^#[0-9a-f]{3,8}$/i', $value) === 1
             || preg_match('/^(rgba?|hsla?)\s*\(/i', $value) === 1;
+    }
+
+    // ─── Native-first steering (1.5) ─────────────────────────────────────────
+    //
+    // custom-shortcode, hardcoded-date and html-in-text. Each finds a pattern
+    // that site builds used in place of a native feature, and names the
+    // feature. All three read only element text, so they stay quiet on keys
+    // that hold data, conditions or CSS.
+
+    /** Keys whose strings are data, rules or CSS, never copy. */
+    private const NATIVE_SKIP_KEYS = ['css', 'class', 'id', 'hide_bp', 'show_condition', 'custom_atts', '_p_json', '_p_data', '_label'];
+
+    /** Month names and their usual abbreviations. */
+    private const MONTHS = 'jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?';
+
+    /** Words that put a deadline on an offer. */
+    private const PROMO_WORDS = 'before|until|till|through|thru|ends?|ending|expires?|expiring';
+
+    /** Typography keys of the Text and Headline elements, with Cornerstone 7.9.4's defaults. */
+    private const TEXT_TYPE_DEFAULTS = [
+        'text'     => ['text_font_family' => 'inherit', 'text_font_weight' => 'inherit', 'text_font_size' => '1em', 'text_line_height' => 'inherit', 'text_text_color' => 'rgba(0, 0, 0, 1)'],
+        'headline' => ['text_font_family' => 'inherit', 'text_font_weight' => 'inherit', 'text_font_size' => '1em', 'text_line_height' => '1.4', 'text_text_color' => 'rgba(0, 0, 0, 1)'],
+    ];
+
+    /**
+     * @param array<string, mixed> $element
+     */
+    private function checkNative(array $element, string $type, \Closure $add): void
+    {
+        $copy = $this->copyStrings($element);
+
+        $this->checkShortcodes($copy, $add);
+        $this->checkHardcodedDates($copy, $add);
+        $this->checkHtmlInText($element, $type, $add);
+    }
+
+    /**
+     * Element strings that are copy rather than data, keyed by path.
+     *
+     * @param  array<string, mixed> $element
+     * @return array<string, string>
+     */
+    private function copyStrings(array $element): array
+    {
+        $copy = [];
+
+        foreach ($this->strings($element) as $path => $value) {
+            $key = explode('.', $path, 2)[0];
+
+            if (in_array($key, self::NATIVE_SKIP_KEYS, true) || str_ends_with($key, '_custom_atts') || str_starts_with($key, 'looper_')) {
+                continue;
+            }
+
+            $copy[$path] = $value;
+        }
+
+        return $copy;
+    }
+
+    /**
+     * @param array<string, string> $copy
+     */
+    private function checkShortcodes(array $copy, \Closure $add): void
+    {
+        if ($this->context->shortcodeSource === null) {
+            return;
+        }
+
+        $seen = [];
+
+        foreach ($copy as $key => $value) {
+            foreach (ShortcodeOrigin::tags($value) as $tag) {
+                if (isset($seen[$tag])) {
+                    continue;
+                }
+
+                $seen[$tag] = true;
+                $source = ($this->context->shortcodeSource)($tag);
+
+                if (! is_array($source) || in_array($source['origin'] ?? '', ShortcodeOrigin::PLATFORM, true)) {
+                    continue; // Unregistered text, or part of the platform.
+                }
+
+                $add('custom-shortcode', sprintf(
+                    '%s: [%s] is defined in %s, outside WordPress, Pro and Themeco extensions, so the page depends on that code. Build it with Dynamic Content or Twig instead; pe://guide/native has recipes.',
+                    $key,
+                    $tag,
+                    (string) ($source['file'] ?? 'unknown file')
+                ));
+            }
+        }
+    }
+
+    /**
+     * @param array<string, string> $copy
+     */
+    private function checkHardcodedDates(array $copy, \Closure $add): void
+    {
+        foreach ($copy as $key => $value) {
+            $copyright = self::copyrightYear($value);
+
+            if ($copyright !== null) {
+                $add('hardcoded-date', sprintf(
+                    '%s: "%s" is a typed year beside the copyright mark, so it goes stale every January. Use {{dc:global:date format="Y"}}, which follows the site\'s timezone, or Twig (pe://guide/native).',
+                    $key,
+                    $copyright
+                ));
+            }
+
+            $promo = self::promoDate($value);
+
+            if ($promo !== null) {
+                $add('hardcoded-date', sprintf(
+                    '%s: "%s" puts a typed date in promotional copy, so it stays up after the date passes. Keep the date in a Global Parameter and switch the copy with a show condition (global:today) or Twig; pe://guide/native has the recipe.',
+                    $key,
+                    $promo
+                ));
+            }
+        }
+    }
+
+    /**
+     * A typed year beside ©, "(c)" or "Copyright", or null.
+     *
+     * The first year of a range that ends in a token or Twig is a founding
+     * date, not a stale one, so "© 2015–{{dc:global:date format="Y"}}" passes.
+     */
+    public static function copyrightYear(string $value): ?string
+    {
+        $text = self::plainText($value);
+        $mark = '(?:©|\(c\)|\bcopyright\b)';
+        $dash = '(?:-|–|—|\bto\b)';
+
+        if (preg_match('/' . $mark . '\s*(?:(?:19|20)\d{2}\s*' . $dash . '\s*)?((?:19|20)\d{2})\b(?!\s*' . $dash . '\s*\{)/iu', $text, $match)
+            || preg_match('/\b((?:19|20)\d{2})\s*©/u', $text, $match)
+        ) {
+            return trim($match[0]);
+        }
+
+        return null;
+    }
+
+    /**
+     * A typed date after deadline wording ("before November 1", "until
+     * 12/31", "through Nov 1st"), or null.
+     */
+    public static function promoDate(string $value): ?string
+    {
+        $text = self::plainText($value);
+        $months = self::MONTHS;
+        $day = '(?:[12]\d|3[01]|0?[1-9])(?:st|nd|rd|th)?';
+
+        $date = '(?:'
+            . '(?:' . $months . ')\.?\s+' . $day . '\b(?:,?\s+\d{4})?'          // November 1, Nov. 1st, 2026
+            . '|' . $day . '\s+(?:of\s+)?(?:' . $months . ')\b'                 // 1 November, 1st of Nov
+            . '|(?:0?[1-9]|1[0-2])\/(?:0?[1-9]|[12]\d|3[01])(?:\/(?:\d{4}|\d{2}))?\b(?!\s+of\b)' // 12/31, 12/31/26
+            . ')';
+
+        if (preg_match('/\b(?:' . self::PROMO_WORDS . ')(?:\s+(?:on|the))?\s+' . $date . '/iu', $text, $match)) {
+            return trim($match[0]);
+        }
+
+        return null;
+    }
+
+    /**
+     * Text with tags taken out, common entities decoded and spaces collapsed.
+     */
+    private static function plainText(string $value): string
+    {
+        $text = (string) preg_replace('/<[^>]*>/', ' ', $value);
+        $text = str_ireplace(['&copy;', '&#169;', '&#xa9;', '&nbsp;', '&#160;', '&ndash;', '&mdash;'], ['©', '©', '©', ' ', ' ', '–', '—'], $text);
+
+        return trim((string) preg_replace('/\s+/u', ' ', $text));
+    }
+
+    /**
+     * Block-level HTML inside a Text or Headline whose own typography is off.
+     *
+     * An element whose type settings all inherit (or whose css sets display:
+     * contents) and whose content is a block of markup with its own classes
+     * is a design pasted in as HTML: nothing in it can be edited, bound to a
+     * parameter or restyled from the builder.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function checkHtmlInText(array $element, string $type, \Closure $add): void
+    {
+        $defaults = self::TEXT_TYPE_DEFAULTS[$type] ?? null;
+        $content = $element['text_content'] ?? null;
+
+        if ($defaults === null || ! is_string($content) || ! str_contains($content, '<')) {
+            return;
+        }
+
+        $tag = self::blockTag($content);
+
+        if ($tag === null) {
+            return;
+        }
+
+        $inherits = true;
+
+        foreach ($defaults as $key => $default) {
+            $value = $element[$key] ?? $default;
+
+            if (! is_string($value) || strtolower(trim($value)) !== 'inherit') {
+                $inherits = false;
+                break;
+            }
+        }
+
+        $contents = is_string($element['css'] ?? null) && preg_match('/display\s*:\s*contents\b/i', $element['css']) === 1;
+
+        if (! $inherits && ! $contents) {
+            return;
+        }
+
+        $add('html-in-text', sprintf(
+            'text_content holds block-level HTML (<%s>) while %s: a design pasted in as markup. Build it from elements with their own settings (layout-div, headline, text) and a component for anything that repeats, so it stays editable in the builder.',
+            $tag,
+            $contents ? 'its css sets display: contents' : 'its typography settings are all inherit'
+        ));
+    }
+
+    /**
+     * The first block-level tag in some HTML, or null.
+     */
+    public static function blockTag(string $html): ?string
+    {
+        if (preg_match('/<(div|section|article|figure|ul|ol|table|h[1-6])\b/i', $html, $match)) {
+            return strtolower($match[1]);
+        }
+
+        if (preg_match('/<p\b[^>]*\sclass\s*=/i', $html)) {
+            return 'p class';
+        }
+
+        return null;
     }
 }

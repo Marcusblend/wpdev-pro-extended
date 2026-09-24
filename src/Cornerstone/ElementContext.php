@@ -8,6 +8,7 @@ use ProExtended\Elements\ControlSurface;
 use ProExtended\Elements\ElementStamper;
 use ProExtended\Elements\LintContext;
 use ProExtended\Elements\SchemaExtractor;
+use ProExtended\Elements\ShortcodeOrigin;
 use ProExtended\Site\Features;
 
 /**
@@ -150,6 +151,7 @@ final class ElementContext
             $this->looperChecker(),
             $this->cssPropertyChecker(),
             $this->styleKeyReader(),
+            $this->shortcodeSource(),
         );
     }
 
@@ -213,6 +215,115 @@ final class ElementContext
 
             return $cache[$type];
         };
+    }
+
+    /**
+     * Where each registered shortcode is defined, for the custom-shortcode lint.
+     *
+     * Reads $shortcode_tags when asked, so a tag registered after the context
+     * was built still resolves, and reflects each callback once.
+     *
+     * @return (\Closure(string): ?array{origin: string, file: string})|null
+     */
+    private function shortcodeSource(): ?\Closure
+    {
+        if (! function_exists('shortcode_exists')) {
+            return null;
+        }
+
+        $roots = self::shortcodeRoots();
+        $cache = [];
+
+        return static function (string $tag) use (&$cache, $roots): ?array {
+            if (array_key_exists($tag, $cache)) {
+                return $cache[$tag];
+            }
+
+            global $shortcode_tags;
+
+            if (! is_array($shortcode_tags) || ! isset($shortcode_tags[$tag])) {
+                return $cache[$tag] = null;
+            }
+
+            $file = ShortcodeOrigin::definingFile($shortcode_tags[$tag]);
+
+            if ($file === null) {
+                return $cache[$tag] = null;
+            }
+
+            return $cache[$tag] = [
+                'origin' => ShortcodeOrigin::classify($file, $roots),
+                'file'   => ShortcodeOrigin::label($file, $roots),
+            ];
+        };
+    }
+
+    /**
+     * The directories ShortcodeOrigin classifies a file by, on this install.
+     *
+     * Cornerstone is Themeco's wherever it lives: bundled in Pro or X, where
+     * the theme around it is Themeco's too, or as its own plugin. Max products
+     * are Themeco plugins as well; their folders come from x_max_plugins.
+     *
+     * @return array<string, string[]>
+     */
+    private static function shortcodeRoots(): array
+    {
+        $paths = static function (string ...$paths): array {
+            $out = [];
+
+            foreach ($paths as $path) {
+                if ($path === '') {
+                    continue;
+                }
+
+                $out[] = $path;
+                $real = realpath($path);
+
+                if (is_string($real) && $real !== $path) {
+                    $out[] = $real;
+                }
+            }
+
+            return $out;
+        };
+
+        $abspath = defined('ABSPATH') ? (string) ABSPATH : '';
+        $themeco = [];
+
+        if (defined('CS_ROOT_PATH')) {
+            $cornerstone = (string) constant('CS_ROOT_PATH');
+            $themeco[] = $cornerstone;
+
+            if (function_exists('get_template_directory')) {
+                $template = (string) get_template_directory();
+
+                // Pro and X bundle Cornerstone inside the theme.
+                if ($template !== '' && str_starts_with(rtrim(str_replace('\\', '/', $cornerstone), '/') . '/', rtrim(str_replace('\\', '/', $template), '/') . '/')) {
+                    $themeco[] = $template;
+                }
+            }
+        }
+
+        $maxFolders = [];
+
+        foreach ((array) get_option('x_max_plugins', []) as $entry) {
+            $plugin = is_array($entry) ? ($entry['plugin'] ?? null) : null;
+
+            if (is_string($plugin) && str_contains($plugin, '/')) {
+                $maxFolders[] = explode('/', $plugin, 2)[0];
+            }
+        }
+
+        return [
+            'abspath'         => $paths($abspath),
+            'core'            => $abspath === '' ? [] : $paths($abspath . 'wp-includes', $abspath . 'wp-admin'),
+            'themeco'         => $paths(...$themeco),
+            'mu_plugins'      => defined('WPMU_PLUGIN_DIR') ? $paths((string) WPMU_PLUGIN_DIR) : [],
+            'plugins'         => defined('WP_PLUGIN_DIR') ? $paths((string) WP_PLUGIN_DIR) : [],
+            'themes'          => function_exists('get_theme_root') ? $paths((string) get_theme_root()) : [],
+            'themeco_plugins' => array_values(array_unique($maxFolders)),
+        ];
     }
 
     /**
