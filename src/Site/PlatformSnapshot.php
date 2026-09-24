@@ -43,8 +43,39 @@ final class PlatformSnapshot
             'theme_option_keys'      => $this->themeOptionKeys(),
             'dynamic_content_groups' => $this->dynamicContentGroups(),
             'looper_types'           => $this->looperTypes(),
-            'permissions'            => array_keys(Features::permissions()),
+            'permissions'            => self::permissionNames(Features::permissions()),
         ];
+    }
+
+    /**
+     * The permission names Cornerstone answered for, allowed and denied alike.
+     *
+     * Only the names go into the fingerprint, not which way each one went:
+     * the answers belong to whoever is calling, so storing them would make a
+     * baseline saved by an administrator drift the moment an editor compared
+     * against it. A name that appears or disappears is what the baseline is
+     * for. When Cornerstone's permission service cannot be read the list is
+     * empty, which the diff reports as every name removed.
+     *
+     * @param  array<string, mixed> $permissions Features::permissions()
+     * @return string[]
+     */
+    public static function permissionNames(array $permissions): array
+    {
+        $names = [];
+
+        foreach (['allowed', 'denied'] as $list) {
+            foreach ((array) ($permissions[$list] ?? []) as $name) {
+                if (is_string($name) && $name !== '') {
+                    $names[] = $name;
+                }
+            }
+        }
+
+        $names = array_values(array_unique($names));
+        sort($names);
+
+        return $names;
     }
 
     /**
