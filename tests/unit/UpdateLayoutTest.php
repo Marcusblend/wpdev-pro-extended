@@ -84,3 +84,26 @@ T::same(update_layout_fixture(), $nowhere['data'], 'before anything is taken out
 
 $noTo = $tool->patch(update_layout_fixture(), [['op' => 'move', 'path' => '0._modules.0']]);
 T::ok(str_contains($noTo['errors'][0] ?? '', 'needs "to"'), 'a move without "to" is refused');
+
+// wrap: the wrapper is stamped like an added element -------------------------
+
+$stamper = new ProExtended\Elements\ElementStamper(['layout-div' => 1, 'text' => 1], '4_4');
+$legacy = [['_type' => 'text', '_label' => 'Old']];
+
+$wrapped = $tool->patch($legacy, [['op' => 'wrap', 'path' => '0', 'value' => ['_type' => 'layout-div', '_label' => 'Wrapper']]], false, $stamper);
+T::same([], $wrapped['errors'], 'a wrap succeeds');
+T::same(['e' => 1], $wrapped['data'][0]['_m'] ?? null, 'the wrapper carries the migration marker');
+T::same('4_4', $wrapped['data'][0]['_bp_base'] ?? null, 'and the breakpoint marker');
+T::same($legacy[0], $wrapped['data'][0]['_modules'][0], 'the wrapped element keeps exactly the markers it had');
+T::same(1, $stamper->counts()['elements'], 'only the wrapper was stamped');
+
+$kept = $tool->patch($legacy, [['op' => 'wrap', 'path' => '0', 'value' => ['_type' => 'layout-div', '_m' => ['e' => 0], '_bp_base' => '3_3']]], false, new ProExtended\Elements\ElementStamper(['layout-div' => 1], '4_4'));
+T::same(['e' => 0], $kept['data'][0]['_m'], 'markers the wrapper already has are left alone');
+T::same('3_3', $kept['data'][0]['_bp_base'], 'including its breakpoint tag');
+
+$unstamped = $tool->patch($legacy, [['op' => 'wrap', 'path' => '0', 'value' => ['_type' => 'layout-div']]]);
+T::ok(! isset($unstamped['data'][0]['_m']), 'with stamp_new off nothing is stamped');
+
+$added = $tool->patch($legacy, [['op' => 'add', 'path' => '1', 'value' => ['_type' => 'layout-div']]], false, new ProExtended\Elements\ElementStamper(['layout-div' => 1], '4_4'));
+T::same(['e' => 1], $added['data'][1]['_m'] ?? null, 'an added element is stamped the same way');
+T::same('4_4', $added['data'][1]['_bp_base'] ?? null, 'with both markers');

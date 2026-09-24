@@ -90,7 +90,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                 ],
                 'stamp_new' => [
                     'type'        => 'boolean',
-                    'description' => 'Optional. Give elements inserted by "add" operations the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
+                    'description' => 'Optional. Give elements inserted by "add" operations, and the wrapper a "wrap" puts in, the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
                 ],
             ],
         ];
@@ -238,7 +238,12 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             $path   = $op['path'] ?? '';
             $value  = $op['value'] ?? null;
 
-            if ($opType === 'add' && $stamper !== null && is_array($value)) {
+            // What an operation brings in is new to the document and gets the
+            // markers Cornerstone gives a new element: the element "add"
+            // inserts, and the wrapper "wrap" puts around an existing one. The
+            // wrapper is stamped before the existing element goes inside it, so
+            // that element keeps exactly the markers it had.
+            if (($opType === 'add' || $opType === 'wrap') && $stamper !== null && is_array($value)) {
                 $value = $this->stampInserted($stamper, $value, $flat);
             }
 
@@ -264,7 +269,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
     }
 
     /**
-     * Stamp what an "add" operation inserts: one element (with its children),
+     * Stamp what an "add" or "wrap" operation inserts: one element (with its children),
      * a list of elements, or, in a component document's flat map, a single
      * element whose children are ID strings.
      *
