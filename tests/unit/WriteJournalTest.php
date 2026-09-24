@@ -81,7 +81,8 @@ T::same('set_api_allowlist', $logged['tool'] ?? null, 'and journalled');
 T::ok($logged['failed'] ?? false, 'as failed');
 T::same('Pass add, remove, or both.', $logged['error'] ?? null, 'with the error the caller saw');
 
-$server->handleRequest(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'list_colors', 'arguments' => ['unexpected' => true]]]);
-T::same('set_api_allowlist', $journal->read()[0]['tool'] ?? null, 'a read tool that throws is not journalled');
+$readFailure = $server->handleRequest(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'render_preview', 'arguments' => []]]);
+T::ok($readFailure['result']['isError'] ?? false, 'a read tool that throws is reported to the caller');
+T::same('set_api_allowlist', $journal->read()[0]['tool'] ?? null, 'but not journalled');
 
 WpStub::reset();
