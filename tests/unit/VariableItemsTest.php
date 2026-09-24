@@ -138,3 +138,46 @@ T::same(1, count(GlobalParameters::prepare('{not json', [], '4_4')['errors']), '
 T::same(1, count(GlobalParameters::prepare(5, [], '4_4')['errors']), 'a schema that is not an object or string is refused');
 T::same(1, count(GlobalParameters::prepare([], 'nope', '4_4')['errors']), 'values that are not JSON are refused');
 T::same([], GlobalParameters::prepare('', null, '4_4')['errors'], 'empty input is allowed, and clears them');
+
+// The schema keeps its shape --------------------------------------------------------
+
+$storedSchema = '{"card#":{},"title":"text|Café \/ Bar","panel":{"type":"group","params":{},"initial":{}},"rows":{"type":"group[]","initial":[]}}';
+
+$dataOnly = GlobalParameters::prepare($storedSchema, ['title' => 'New'], '4_4');
+T::same([], $dataOnly['errors'], 'a data-only write against a stored schema is accepted');
+T::same($storedSchema, $dataOnly['json'], 'and leaves the stored schema string byte-identical');
+
+T::same('{}', GlobalParameters::prepare('{}', ['a' => 1], '4_4')['json'], 'an empty schema stays {}');
+T::same('', GlobalParameters::prepare('', ['a' => 1], '4_4')['json'], 'an empty option stays empty');
+
+$decoded = json_decode($storedSchema, true);
+$reencoded = GlobalParameters::encodeSchema($decoded);
+T::same('{"card#":{},"title":"text|Café / Bar","panel":{"type":"group","params":{},"initial":{}},"rows":{"type":"group[]","initial":[]}}', $reencoded, 'a schema that arrives decoded is encoded with its objects put back');
+T::ok(str_contains((string) $reencoded, '"card#":{}'), 'a "name#" group\'s params are an object');
+T::ok(str_contains((string) $reencoded, '"params":{}') && str_contains((string) $reencoded, '"initial":{}'), 'as are a group\'s params and initial value');
+T::ok(str_contains((string) $reencoded, '"initial":[]'), 'while a group[]\'s initial rows stay a list');
+T::same('{}', GlobalParameters::encodeSchema([]), 'an empty decoded schema is {}');
+T::same('{"a":{"type":"select","options":[]}}', GlobalParameters::encodeSchema(['a' => ['type' => 'select', 'options' => []]]), 'a list of options stays a list');
+T::same('x', GlobalParameters::encodeSchema('x'), 'a string is never re-encoded');
+
+$fromArray = GlobalParameters::prepare(['gutter' => ['type' => 'group', 'params' => []]], [], '4_4');
+T::same('{"gutter":{"type":"group","params":{}}}', $fromArray['json'], 'prepare() encodes a decoded schema the same way');
+
+// The tool keeps a string it is given as it is ---------------------------------------
+
+WpStub::reset();
+WpStub::$options[GlobalParameters::JSON_OPTION] = $storedSchema;
+
+$setParameters = new ProExtended\Mcp\Tools\SetGlobalParameters(
+    new ProExtended\Cornerstone\DocumentGateway(),
+    new ProExtended\Settings\SettingsBackups(new ProExtended\Cornerstone\DocumentGateway()),
+    new ProExtended\Cornerstone\ElementContext(new ProExtended\Elements\SchemaExtractor())
+);
+
+$preview = $setParameters->execute(['data' => ['title' => 'New'], 'dry_run' => true]);
+T::same(strlen($storedSchema), $preview['json_bytes'], 'set_global_parameters with only data would write the stored schema unchanged');
+
+$asString = $setParameters->execute(['json' => '{"a":{}}', 'dry_run' => true]);
+T::same(strlen('{"a":{}}'), $asString['json_bytes'], 'and a schema passed as a string is kept as that string');
+
+WpStub::reset();

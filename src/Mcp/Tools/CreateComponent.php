@@ -130,7 +130,7 @@ final class CreateComponent implements ToolInterface, AnnotatedToolInterface
         }
 
         if ($parameters !== null && $parameters !== []) {
-            $encoded = json_encode($parameters, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            $encoded = \ProExtended\Settings\GlobalParameters::encodeSchema($parameters);
 
             if (! is_string($encoded)) {
                 throw new \InvalidArgumentException('parameters could not be encoded as a _p_json schema.');
