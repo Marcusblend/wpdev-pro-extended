@@ -142,6 +142,20 @@ final class CreateTranslation implements ToolInterface, AnnotatedToolInterface
             $this->gateway->assertCanWriteDocuments();
         }
 
+        // Cornerstone's own permission for what is being copied, beside the
+        // WordPress capabilities above: a role can keep edit_posts and lose
+        // Cornerstone's layout or component access, and a translation must
+        // not write what the builder would refuse the same user.
+        $cornerstoneKey = self::cornerstonePermission($post->post_type);
+
+        if ($cornerstoneKey !== null && (new \ProExtended\Cornerstone\Permissions())->userCan($cornerstoneKey) === false) {
+            throw new ToolPermissionException(sprintf(
+                'Cornerstone\'s "%s" permission is off for your role, so this %s cannot be translated.',
+                $cornerstoneKey,
+                $post->post_type
+            ));
+        }
+
         $report = Languages::report();
         $codes = array_column($report['languages'] ?? [], 'code');
 
@@ -270,6 +284,21 @@ final class CreateTranslation implements ToolInterface, AnnotatedToolInterface
     /**
      * Whether a post type is one of Cornerstone's own documents.
      */
+    /**
+     * The Cornerstone permission that governs a post type, or null when
+     * Cornerstone has none for it.
+     */
+    public static function cornerstonePermission(string $postType): ?string
+    {
+        return match (true) {
+            $postType === 'cs_global_block'   => 'component',
+            str_starts_with($postType, 'cs_') => 'layout',
+            $postType === 'page'              => 'content.page',
+            $postType === 'post'              => 'content.post',
+            default                           => null,
+        };
+    }
+
     public static function isDocumentType(string $postType): bool
     {
         return str_starts_with($postType, 'cs_');

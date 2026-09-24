@@ -47,13 +47,13 @@ final class Permissions
         'set_colors'               => 'global.colors',
         'set_fonts'                => 'global.fonts',
         'set_global_css'           => 'global.edit_custom_css',
+        'set_global_js'            => 'global.edit_custom_js',
         'get_global_css'           => 'global.theme_options',
         'get_theme_options'        => 'global.theme_options',
         'update_theme_options'     => 'global.theme_options',
         'set_variables'            => 'global.variables',
         'set_global_parameters'    => 'global.theme_options',
         'create_snapshot'          => 'global.theme_options',
-        'restore_snapshot'         => 'global.theme_options',
         'list_settings_backups'    => 'global',
         'restore_settings'         => 'global',
         // Cornerstone's own dashboard saves the allowlist with manage_options
@@ -75,6 +75,7 @@ final class Permissions
         'validate_layout'          => 'element-library',
         'list_prefabs'             => 'element-library',
         'list_dynamic_content'     => 'element-library',
+        'get_native_reference'     => 'element-library',
         'render_preview'           => 'element-library',
     ];
 
@@ -94,7 +95,7 @@ final class Permissions
         'list_fonts'            => 'The fonts every builder user sees in a font picker; changing them (set_fonts) is gated.',
         // Pending: the translation work gates this per document type and moves
         // it into TOOL_KEYS; until then it keeps its WordPress checks.
-        'create_translation'    => 'Checks edit rights on the source post and the post type\'s publish capability itself.',
+        'create_translation'    => 'Checks edit rights on the source post, the post type\'s publish capability and the Cornerstone permission for the source\'s type (component, layout, content.page or content.post) itself, since one static key cannot cover every type it copies.',
     ];
 
     /**

@@ -105,3 +105,11 @@ T::same(1, $mapped['translated'], 'and the swaps are counted');
 T::same(['ids' => [5], 'translated' => 0], CreateTranslation::translateIds([5], static fn (int $id): mixed => $id), 'a lookup that returns the same id is not a translation');
 T::same([20], CreateTranslation::translateIds([10, 11], static fn (int $id): mixed => 20)['ids'], 'two terms that translate to one are set once');
 T::same([], CreateTranslation::translateIds([], static fn (int $id): mixed => 1)['ids'], 'no terms, nothing to set');
+
+// ─── Cornerstone permission per source type ─────────────────────────────────
+
+T::same('component', CreateTranslation::cornerstonePermission('cs_global_block'), 'a component is governed by Cornerstone\'s component permission');
+T::same('layout', CreateTranslation::cornerstonePermission('cs_header'), 'a header by the layout permission');
+T::same('content.page', CreateTranslation::cornerstonePermission('page'), 'a page by content.page');
+T::same('content.post', CreateTranslation::cornerstonePermission('post'), 'a post by content.post');
+T::same(null, CreateTranslation::cornerstonePermission('product'), 'any other type has no Cornerstone key');
