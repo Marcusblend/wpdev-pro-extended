@@ -204,36 +204,64 @@ Commands that write (`wp pe layout import`, and `wp pe mcp call` for any tool th
 
 ## Capabilities
 
-### MCP Tools (26)
+### Building natively
+
+Pro Extended exists so a model can build a site with Cornerstone's own features. The handshake instructions give it an order to work in: the element's own setting (`get_element_schema`), a global reference in that setting (`global-color:`, `global-ff:`, a Global Variable), components and Global Parameters, Dynamic Content and Twig, conditions, loopers, native elements and effects, and only then Global CSS or Global JS. A site build never ships PHP, a plugin, an mu-plugin, `functions.php` code, a custom shortcode or `wp_head` output. `get_native_reference` reads what the site's Cornerstone offers, `pe://guide/native` holds worked recipes, and the `custom-shortcode`, `hardcoded-date` and `html-in-text` warnings catch builds that drift off the native path.
+
+The plugin itself adds nothing to the front end: it registers a REST route and WP-CLI commands, and every option it owns is tooling state that nothing reads while a page renders.
+
+### MCP Tools (47)
 
 | Tool | Type | Description |
 |------|------|-------------|
-| `list_elements` | Read | List all Cornerstone element types with groups and valid children |
-| `get_element_schema` | Read | Get full schema for a specific element type (properties, defaults, options) |
-| `list_layouts` | Read | List all layouts (pages, headers, footers, layouts, component documents) with their doc type |
-| `get_layout` | Read | Get complete layout JSON with metadata and checksum; `summary` returns an outline, `path` one subtree |
-| `validate_layout` | Read | Validate layout structure, hierarchy, `_bp_data` and component instances, plus coded warnings for element data Cornerstone would render differently than intended |
-| `list_colors` | Read | Get the Cornerstone global color palette |
-| `list_fonts` | Read | Get global fonts and the font configuration |
 | `get_site_info` | Read | Versions, breakpoints, active plugins, a `features` block (content storage, Twig, External API, CSV, WPML, WooCommerce, ACF, Max products, your Cornerstone permissions) and a `health` block |
+| `get_native_reference` | Read | What this site's Cornerstone offers natively, by `section`: `dynamic_content`, `twig`, `conditions`, `loopers`, `parameter_types`, `regions` |
+| `list_dynamic_content` | Read | Deprecated alias of `get_native_reference` `section: "dynamic_content"` |
+| `list_elements` | Read | Element types with groups, valid children and valid parents |
+| `get_element_schema` | Read | An element's settings as the Inspector groups them, the keys each control writes, what the element emits and at what specificity (`format: "raw"` for the full definition) |
+| `list_prefabs` | Read | Cornerstone's prefab elements by group, and one prefab's values ready to insert |
+| `list_layouts` | Read | Layouts and documents (pages, headers, footers, layouts, components) with doc type and language |
+| `get_layout` | Read | Layout JSON with metadata and checksum; `summary` returns an outline, `path` one subtree |
+| `validate_layout` | Read | Structure, hierarchy, `_bp_data` and component checks, plus coded warnings (see below) |
+| `render_preview` | Read | Render elements or part of a stored layout to HTML against a post, without saving (open-world: runs shortcodes, Twig and External API loopers) |
+| `list_colors` | Read | The global color palette |
+| `list_fonts` | Read | Global fonts and the font configuration |
 | `list_components` | Read | The component registry the builder uses (IDs, labels, slots, parameters, errors) |
-| `get_global_css` | Read | Global CSS size and managed blocks, one block, or the whole stylesheet |
 | `list_menus` | Read | Navigation menus with locations and `menu:<id>` references |
-| `list_settings_backups` | Read | Backups of colors, fonts, font config and Global CSS |
-| `get_theme_options` | Read | Theme Options panel sections, and option values, defaults and responsive values (secrets redacted) |
-| `create_page` | Write | Create a page (parent, order, template, excerpt), optionally with validated layout data (new elements are stamped) |
+| `list_templates` | Read | The template library by kind (block, preset, document), identifier or title |
+| `get_template` | Read | One template with the content Cornerstone stores |
+| `get_global_css` | Read | Global CSS size and managed blocks, one block, or the whole stylesheet |
+| `get_theme_options` | Read | Theme Options sections, values, defaults and responsive values (secrets redacted) |
+| `list_settings_backups` | Read | Backups of colors, fonts, font config, Global CSS, Global JS and single theme options |
+| `create_snapshot` | Read | One-call inventory of a site's globals, theme options, menus and documents |
+| `get_platform_baseline` | Read/Write | Fingerprint the Cornerstone platform and diff it against the stored one; `save: true` stores it |
+| `get_write_journal` | Read | What the plugin has changed on this site, newest first |
+| `export_tco` | Read | Export documents or templates as a `.tco` archive with Cornerstone's own exporter |
+| `create_page` | Write | Create a page (parent, order, template, excerpt), optionally with validated layout data |
+| `create_document` | Write | Create a header, footer, component document, or single/archive layout (regions checked against the type) |
+| `create_component` | Write | Make a reusable component from elements or from a subtree of an existing layout, then confirm it is registered |
+| `create_template` | Write | Add a block, preset or document template to the library |
+| `import_tco` | Write | Describe a `.tco` archive, then import it with Cornerstone's own importer on `confirm: true` |
+| `create_translation` | Write | Copy a page or document into another WPML language and join it to the source's translation group |
 | `deploy_layout` | Write | Write layout data to a post (auto-backup + validation; full replace for documents) |
+| `update_layout` | Write | Patch operations: add, remove, update, preset, move, duplicate, wrap, unwrap, prefab |
+| `update_document_settings` | Write | A document's or page's settings (layout/header/footer overrides, custom CSS/JS, Custom Document Assets), title or slug |
 | `backup_layout` | Write | Create a timestamped backup (up to 10 per post) |
 | `restore_layout` | Write | Restore from a backup |
-| `clear_cache` | Write | Clear TSS, generated styles, the component registry, assignment rules and/or the host cache |
-| `update_layout` | Write | Apply patch operations (add/remove/update elements) |
-| `create_document` | Write | Create a header, footer, component document, or single/archive layout |
-| `update_document_settings` | Write | Change a document's settings, title or slug without touching its elements |
-| `set_global_css` | Write | Create, replace or remove named Global CSS blocks (or replace the whole stylesheet) |
+| `create_menu` / `update_menu` | Write | Navigation menus, items, nesting, locations and anchor graphics |
 | `set_colors` | Write | Add, update or remove palette colors by `_id` (removal checks where each color is used) |
-| `set_fonts` | Write | Add, update or remove global fonts by `_id` (removal checks where each font is used), and merge font settings |
-| `upload_media` | Write | Add images and web fonts (and, when allowed, SVGs) from HTTPS URLs or base64 |
-| `restore_settings` | Write | Put back a colors, fonts, font config or Global CSS backup |
+| `set_fonts` | Write | Add, update or remove global fonts, including self-hosted custom fonts, and merge font settings |
+| `set_variables` | Write | Cornerstone Global Variables (CSS custom properties), with per-breakpoint values |
+| `set_global_parameters` | Write | The site's global parameter schema and values |
+| `set_global_css` | Write | Named Global CSS blocks — the last resort for styling no setting covers |
+| `set_global_js` | Write | Named Global JS blocks — the home for the few lines of script a build cannot avoid |
+| `update_theme_options` | Write | Theme Options the way the panel writes them, including Twig and its templates (the Advanced PHP extension is refused) |
+| `set_api_allowlist` | Write | Add or remove External API allowlist entries (fails closed) |
+| `upload_media` | Write | Images and web fonts (and, when allowed, SVGs) from HTTPS URLs or base64 |
+| `restore_settings` | Write | Put back a settings backup |
+| `clear_cache` | Write | Clear TSS, generated styles, element surfaces, the component registry, assignment rules and/or the host cache |
+
+Every tool that touches Cornerstone data also checks the Cornerstone permission its work needs (`Permissions::TOOL_KEYS`); the tools that don't are listed with the reason in `Permissions::EXEMPT`.
 
 Every tool declares MCP annotations (`title`, `readOnlyHint`, `destructiveHint`, `idempotentHint`, `openWorldHint`), and the server's `initialize` result includes short usage instructions for the model.
 
@@ -272,6 +300,12 @@ Cornerstone gives every element it creates two markers: `_m` (`{"e": N}`, the el
 | `link-without-href`, `nested-link` | Container links that render as a `div` or `span` |
 | `background-layers-off` | Background layers whose advanced switch is off |
 | `unknown-element`, `invalid-child`, `component-instance` | The structural warnings of earlier versions |
+| `css-over-control` | A `css` declaration sets a property the element has a setting for |
+| `literal-color`, `literal-font-family` | A literal colour or font stack where a global reference belongs (checks `_alt` and `_bp_data` too) |
+| `twig-syntax`, `twig-off` | Twig that does not parse with the site's environment, or Twig on a site where it is off |
+| `custom-shortcode` | A shortcode whose callback lives outside WordPress core, Pro/Cornerstone and Themeco extensions |
+| `hardcoded-date` | A typed copyright year or promo date that will go stale |
+| `html-in-text` | A Text or Headline element holding pasted block HTML with its typography switched off |
 
 #### Removing palette colors and fonts
 
@@ -288,18 +322,20 @@ Cornerstone gives every element it creates two markers: `_m` (`{"e": N}`, the el
 | Menu | `menu:<term_id>` (`list_menus` returns it as `cs_ref`) |
 | Component instance | `{"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}` (IDs from `list_components`) |
 
-### MCP Resources (3)
+### MCP Resources (4)
 
 | URI | Description |
 |-----|-------------|
 | `pe://schema/elements` | Full element definitions (cached) |
 | `pe://schema/hierarchy` | Valid parent-child relationship map |
 | `pe://colors/palette` | Current color palette |
+| `pe://guide/native` | Recipe book for building natively: dates, promos, prices, hours, conditions, navigation, headers, effects, fonts, structured data |
 
 ### WP-CLI Commands
 
 | Command | Description |
 |---------|-------------|
+| `wp pe warm` | Build and store every element type's control surface (run after a deploy or a Cornerstone update) |
 | `wp pe doctor` | Check the site (pass/warn/fail; exits non-zero only on a failure; needs `--user`; `--format=json` prints only the JSON report) |
 | `wp pe layout list` | List all Cornerstone layouts |
 | `wp pe layout export <id>` | Export layout to JSON file |

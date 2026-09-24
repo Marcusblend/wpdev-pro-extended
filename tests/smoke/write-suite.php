@@ -174,7 +174,7 @@ foreach ((array) ($list['result']['tools'] ?? []) as $tool) {
     $tools[$tool['name']] = $tool;
 }
 
-S::check(count($tools) === 45, 'lists 45 tools', (string) count($tools));
+S::check(count($tools) === 47, 'lists 47 tools', (string) count($tools));
 S::check(! isset($tools['restore_snapshot']), 'restore_snapshot is gone (1.5)');
 S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 12 newer tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
@@ -204,7 +204,7 @@ foreach ($baseline as $name => [$properties, $required]) {
 $init = S::rpc('initialize', ['protocolVersion' => '2025-03-26', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pe-smoke', 'version' => '1']]);
 S::check(($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'protocol version unchanged');
 S::check(str_contains((string) ($init['result']['instructions'] ?? ''), 'global-color:'), 'initialize returns instructions');
-S::check(($init['result']['serverInfo']['version'] ?? null) === '1.3.0', 'server reports 1.3.0');
+S::check(($init['result']['serverInfo']['version'] ?? null) === '1.5.0', 'server reports 1.5.0');
 S::check($server->getRegistrationErrors() === [], 'no tool failed to register', wp_json_encode($server->getRegistrationErrors()));
 
 // 18. Storage detection --------------------------------------------------------
@@ -1311,7 +1311,7 @@ foreach ((array) ($menus['menus'] ?? []) as $menu) {
 
 $info = S::ok(S::call('get_site_info'), 'get_site_info');
 $health = (array) ($info['health'] ?? []);
-S::check(($info['pro_extended']['version'] ?? null) === '1.3.0', 'get_site_info reports 1.3.0');
+S::check(($info['pro_extended']['version'] ?? null) === '1.5.0', 'get_site_info reports 1.5.0');
 
 foreach (['cornerstone_available', 'permalinks', 'application_passwords_in_use', 'blog_public', 'breakpoint_ranges_saved', 'current_user', 'global_css_key', 'cornerstone_adapter', 'component_registry', 'host_cache', 'settings', 'environment_type'] as $key) {
     S::check(array_key_exists($key, $health), "the health block has {$key}");
