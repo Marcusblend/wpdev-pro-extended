@@ -424,6 +424,7 @@ TXT;
             'get_platform_baseline' => static fn() => new Tools\GetPlatformBaseline(new PlatformSnapshot($schema, $gateway, $elements)),
             'list_prefabs'          => static fn() => new Tools\ListPrefabs(new \ProExtended\Cornerstone\Prefabs()),
             'list_dynamic_content'  => static fn() => new Tools\ListDynamicContent(new \ProExtended\Cornerstone\DynamicContentCatalog()),
+            'get_native_reference'  => static fn() => new Tools\GetNativeReference(new \ProExtended\Cornerstone\NativeReference()),
             'get_write_journal'     => static fn() => new Tools\GetWriteJournal(new WriteJournal()),
             'render_preview'        => static fn() => new Tools\RenderPreview(new \ProExtended\Cornerstone\Renderer(), $layouts),
             'create_snapshot'       => static fn() => new Tools\CreateSnapshot($siteSnapshot),
