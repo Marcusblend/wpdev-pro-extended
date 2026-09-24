@@ -39,6 +39,7 @@ final class Permissions
 
         // Components.
         'list_components'          => 'component',
+        'create_component'         => 'component',
 
         // Globals.
         'set_colors'               => 'global.colors',

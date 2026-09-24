@@ -483,12 +483,29 @@ final class ControlSurface
                 continue;
             }
 
-            // A one-word match is only the element's own property when nothing
-            // qualifies it. text_graphic_icon_color is the icon's colour, not
-            // the element's, and naming it as "color" would send an author to
-            // the wrong setting — better to report nothing.
-            if ($take === 1 && $count > 1 && in_array($segments[$count - 2], self::QUALIFIERS, true)) {
-                return null;
+            // A match is only the element's own property when nothing qualifies
+            // it. text_graphic_icon_color is the icon's colour, not the
+            // element's, and naming it as "color" would send an author to the
+            // wrong setting — better to report nothing. The word to check is
+            // whatever sits in front of the matched run, however long that run
+            // is: text_graphic_icon_max_width matches "max_width" two segments
+            // deep and is still the icon's, and sub_text_color resolves through
+            // the alias table and is still the sub-text's.
+            $preceding = $count - $take - 1;
+
+            if ($preceding >= 0 && in_array($segments[$preceding], self::QUALIFIERS, true)) {
+                // A one-word match is weak evidence, so any qualifier in front
+                // of it disqualifies the match: icon_color is the icon's.
+                //
+                // A longer match is stronger, so only a qualifier that is not
+                // the element's own leading prefix disqualifies it. On a text
+                // element every key starts with text_, and text_border_radius
+                // is genuinely the element's own radius — but
+                // text_graphic_icon_max_width is the icon's, and the qualifier
+                // sitting in the middle is what says so.
+                if ($take === 1 || $preceding > 0) {
+                    return null;
+                }
             }
 
             return $property;

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace ProExtended\Templates;
 
+use ProExtended\Cornerstone\DocumentSettings;
+use ProExtended\Elements\ElementTree;
+use ProExtended\Mcp\ToolPermissionException;
+
 /**
  * Reads and writes Cornerstone's template library.
  *
@@ -138,6 +142,8 @@ final class TemplateGateway
      */
     public function create(string $type, string $subType, string $title, array $content, string $preview = ''): array
     {
+        self::assertMayStoreCode($content);
+
         $class = self::CLASS_NAME;
         $template = $class::create($type, $subType);
 
@@ -228,6 +234,12 @@ final class TemplateGateway
         ];
     }
 
+    /** The largest a single .json member may expand to. */
+    private const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
+
+    /** The largest everything in one archive may expand to together. */
+    private const MAX_EXTRACTED_BYTES = 32 * 1024 * 1024;
+
     /**
      * What a .tco archive holds, without writing anything.
      *
@@ -247,6 +259,7 @@ final class TemplateGateway
 
         $files = [];
         $entries = [];
+        $extracted = 0;
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = (string) $zip->getNameIndex($i);
@@ -256,10 +269,40 @@ final class TemplateGateway
                 continue;
             }
 
+            // The caller's size limit is on the *compressed* file, which says
+            // nothing about what it expands to: a few hundred KB of zeros
+            // inflates to gigabytes and takes the request down with it. Check
+            // the declared size before extracting, and keep a running total so
+            // a thousand small members cannot add up to the same thing.
+            $stat = $zip->statIndex($i);
+            $declared = is_array($stat) ? (int) ($stat['size'] ?? 0) : 0;
+
+            if ($declared > self::MAX_ENTRY_BYTES || $extracted + $declared > self::MAX_EXTRACTED_BYTES) {
+                $zip->close();
+
+                throw new \RuntimeException(sprintf(
+                    'The archive expands to more than %d MB, so it was not read.',
+                    (int) (self::MAX_EXTRACTED_BYTES / (1024 * 1024))
+                ));
+            }
+
             $raw = $zip->getFromIndex($i);
 
             if (! is_string($raw) || $raw === '') {
                 continue;
+            }
+
+            // statIndex() reports what the archive claims; this is what it
+            // actually produced.
+            $extracted += strlen($raw);
+
+            if ($extracted > self::MAX_EXTRACTED_BYTES) {
+                $zip->close();
+
+                throw new \RuntimeException(sprintf(
+                    'The archive expands to more than %d MB, so it was not read.',
+                    (int) (self::MAX_EXTRACTED_BYTES / (1024 * 1024))
+                ));
             }
 
             $decoded = json_decode($raw, true);
@@ -337,5 +380,59 @@ final class TemplateGateway
         $meta = cs_get_serialized_post_meta($id, '_cs_template_data', true);
 
         return is_array($meta) ? $meta : null;
+    }
+
+    /**
+     * Refuse to store code the author is not trusted to write.
+     *
+     * A template is applied later, by whoever opens the library, so code inside
+     * one runs with that person's privileges rather than the author's.
+     * `create_document` refuses customCSS, customJS and Raw Content from a user
+     * without `unfiltered_html`; anything that lands in the same document has
+     * to be held to the same rule, or the template library becomes the way
+     * around it. The check lives here rather than in the tools so that every
+     * caller passes it — `create_template`, `import_tco`, and whatever is
+     * written next.
+     *
+     * @param array<string, mixed> $content
+     *
+     * @throws ToolPermissionException
+     */
+    public static function assertMayStoreCode(array $content): void
+    {
+        $reason = self::codeReason($content);
+
+        if ($reason !== null) {
+            throw new ToolPermissionException($reason);
+        }
+    }
+
+    /**
+     * Why this template content may not be stored, or null when it may.
+     *
+     * Separate from the assertion so a batch import can skip one entry and
+     * report why, rather than failing the whole archive.
+     *
+     * @param array<string, mixed> $content
+     */
+    public static function codeReason(array $content): ?string
+    {
+        if (current_user_can('unfiltered_html')) {
+            return null;
+        }
+
+        $settings = $content['settings'] ?? null;
+
+        if (is_array($settings) && DocumentSettings::hasCode($settings)) {
+            return 'Storing a template whose settings set customCSS or customJS requires the unfiltered_html capability.';
+        }
+
+        foreach (['elements', 'regions', 'atts'] as $key) {
+            if (isset($content[$key]) && ElementTree::containsRawContent($content[$key])) {
+                return 'Storing a template that contains Raw Content elements requires the unfiltered_html capability.';
+            }
+        }
+
+        return null;
     }
 }

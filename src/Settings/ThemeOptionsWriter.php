@@ -24,7 +24,9 @@ final class ThemeOptionsWriter
      * checks them. The palette and font lists belong to set_colors and
      * set_fonts, which keep their references intact. The breakpoint keys and
      * the stack decide how every piece of stored element data is read, so
-     * changing them here would silently reinterpret the whole site.
+     * changing them here would silently reinterpret the whole site. Variables
+     * and global parameters belong to set_variables and set_global_parameters,
+     * which validate each name and keep their own backups.
      */
     public const REFUSED = [
         'x_custom_styles'     => 'Global CSS is written with set_global_css, which backs it up and reports its size.',
@@ -37,6 +39,9 @@ final class ThemeOptionsWriter
         'x_breakpoint_base'   => 'The breakpoint base decides how every element\'s stored responsive data is read; changing it here would reinterpret the whole site.',
         'x_breakpoint_ranges' => 'The breakpoint ranges decide how every element\'s stored responsive data is read; changing them here would reinterpret the whole site.',
         'x_stack'             => 'The stack changes the theme\'s markup and styling wholesale and is chosen in the Theme Options panel.',
+        'cs_theme_variables'  => 'Global variables are written with set_variables, which validates each name and backs the list up.',
+        'cs_global_parameter_json' => 'Global parameters are written with set_global_parameters, which checks the schema against the values.',
+        'cs_global_parameter_data' => 'Global parameter values are written with set_global_parameters, which checks them against the schema.',
     ];
 
     /** Suffixes that carry responsive data for a registered key. */

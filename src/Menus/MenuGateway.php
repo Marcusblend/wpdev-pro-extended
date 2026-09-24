@@ -76,6 +76,15 @@ final class MenuGateway
                 'object'    => (string) $item->object,
                 'object_id' => (int) $item->object_id,
                 'target'    => (string) $item->target,
+                // Every field wp_update_nav_menu_item() rewrites has to be read
+                // back, or an update that does not mention one writes it empty.
+                // classes arrives from wp_setup_nav_menu_item() as an array and
+                // goes back as the space-separated string core expects.
+                'classes'     => implode(' ', array_filter(array_map('strval', (array) $item->classes))),
+                'description' => (string) $item->description,
+                'attr_title'  => (string) $item->attr_title,
+                'xfn'         => (string) $item->xfn,
+                'status'      => (string) $item->post_status,
             ];
 
             $graphic = $this->graphics((int) $item->ID);
@@ -397,6 +406,21 @@ final class MenuGateway
 
         $args['menu-item-status'] ??= 'publish';
         $args['menu-item-type'] ??= 'custom';
+
+        // wp_update_nav_menu_item() reads a missing menu-item-position as
+        // "append" and writes menu_order = 1 + the last item's, so an update
+        // that only changes a title would move that item to the bottom of the
+        // menu. Writing back the position it already has leaves it — and every
+        // sibling — exactly where they were. An operation that *does* ask for a
+        // position still withholds the key, because resequence() owns ordering
+        // and has to renumber the siblings too.
+        if (
+            $itemId > 0
+            && ($operation['position'] ?? null) === null
+            && isset($existing[$itemId]['order'])
+        ) {
+            $args['menu-item-position'] = (int) $existing[$itemId]['order'];
+        }
 
         if (array_key_exists('parent', $operation) && $operation['parent'] !== null) {
             $parent = $operation['parent'];

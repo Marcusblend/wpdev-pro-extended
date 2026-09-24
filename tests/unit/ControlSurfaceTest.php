@@ -169,6 +169,20 @@ T::same('text_text_align', $props['text-align'] ?? null, 'and so does a named ke
 T::same('text_border_radius', $props['border-radius'] ?? null, 'a two-word property is matched');
 T::ok(! isset($props['display']), 'a property no control writes is absent');
 
+// A qualifier inside the key means the property belongs to that part, however
+// many segments the match ran to. Reporting the element's own setting here
+// would send an author to the wrong control — the failure the guard exists for.
+$nested = ControlSurface::cssProperties(ControlSurface::build(
+    ['control_nav' => ['a' => 'A', 'a:one' => 'One'], 'controls' => [
+        ['key' => 'text_graphic_icon_max_width', 'type' => 'unit', 'group' => 'a:one', 'label' => 'Icon Width'],
+        ['key' => 'text_graphic_icon_color', 'type' => 'color', 'group' => 'a:one', 'label' => 'Icon Color'],
+    ]],
+    ['text_graphic_icon_max_width' => 'style', 'text_graphic_icon_color' => 'style'],
+    []
+));
+T::ok(! isset($nested['max-width']), 'a two-word match behind a qualifier is not the element\'s own property');
+T::ok(! isset($nested['color']), 'and neither is a one-word match behind one');
+
 $markupOnly = ControlSurface::cssProperties(ControlSurface::build(
     ['control_nav' => ['a' => 'A', 'a:one' => 'One'], 'controls' => [
         ['key' => 'thing_position', 'type' => 'select', 'group' => 'a:one', 'label' => 'Tag'],

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Site\Languages;
 use ProExtended\Support\Args;
 
@@ -78,6 +79,32 @@ final class CreateTranslation implements ToolInterface, AnnotatedToolInterface
 
         if (! $post instanceof \WP_Post) {
             throw new \InvalidArgumentException(sprintf('Post %d does not exist.', $postId));
+        }
+
+        // A translation copies the source's content, layout data and settings
+        // wholesale, so it hands the caller everything in the source. Being
+        // able to edit that particular post is the price of copying it —
+        // `edit_posts` alone would let anyone duplicate a private draft.
+        if (! current_user_can('edit_post', $postId)) {
+            throw new ToolPermissionException(sprintf(
+                'You do not have permission to edit post %d, so it cannot be translated.',
+                $postId
+            ));
+        }
+
+        // And publishing the copy is publishing, whatever it is a copy of.
+        if ($status === 'publish') {
+            $typeObject = get_post_type_object($post->post_type);
+            $publishCap = is_object($typeObject) && isset($typeObject->cap->publish_posts)
+                ? (string) $typeObject->cap->publish_posts
+                : 'publish_posts';
+
+            if (! current_user_can($publishCap)) {
+                throw new ToolPermissionException(sprintf(
+                    'Publishing a translation requires the "%s" capability. Create it as a draft instead.',
+                    $publishCap
+                ));
+            }
         }
 
         $report = Languages::report();
