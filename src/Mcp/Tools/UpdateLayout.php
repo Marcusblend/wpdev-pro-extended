@@ -25,6 +25,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         private readonly HierarchyValidator $validator,
         private readonly ?ElementContext $elements = null,
         private readonly ?TemplateGateway $templates = null,
+        private readonly ?Prefabs $prefabs = null,
     ) {}
 
     public function name(): string
@@ -34,7 +35,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. The editing operations: move takes "to", a path read in the tree as it is now: the element lands there and the one there moves down; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name" (list_prefabs reports them), already configured. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. The editing operations: move takes "to", a path read in the tree as it is now: the element lands there and the one there moves down; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name", already configured (call list_prefabs with them first: a write takes the values that read cached). Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -627,6 +628,10 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     /**
      * Insert one of Cornerstone's prefab elements by name.
+     *
+     * The values come from the cache list_prefabs fills, never from the
+     * registry: reading the registry enters Cornerstone's builder context,
+     * and this runs inside a write.
      */
     private function applyPrefab(array &$data, string $path, string $group, string $name): void
     {
@@ -634,10 +639,21 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException('A prefab operation needs "group" and "name". list_prefabs reports both.');
         }
 
-        $values = (new Prefabs())->values($group, $name);
+        $prefabs = $this->prefabs ?? new Prefabs();
+        $values = $prefabs->cached($group, $name);
 
         if ($values === null) {
-            throw new \InvalidArgumentException(sprintf('No prefab "%s" in group "%s". Use list_prefabs to see them.', $name, $group));
+            if ($prefabs->cachedAll()) {
+                throw new \InvalidArgumentException(sprintf('No prefab "%s" in group "%s". Use list_prefabs to see them.', $name, $group));
+            }
+
+            throw new \InvalidArgumentException(sprintf(
+                'Prefab "%s" in group "%s" has not been read yet. Its values come from Cornerstone\'s builder, which a write must not enter, so call list_prefabs with group "%s" and name "%s" first and then run this operation again.',
+                $name,
+                $group,
+                $group,
+                $name
+            ));
         }
 
         $this->applyAdd($data, $path, $values);
