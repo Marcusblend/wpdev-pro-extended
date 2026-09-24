@@ -52,7 +52,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                         'properties' => [
                             'op' => [
                                 'type' => 'string',
-                                'enum' => ['add', 'remove', 'update'],
+                                'enum' => ['add', 'remove', 'update', 'preset'],
                                 'description' => 'Operation type.',
                             ],
                             'path' => [
@@ -61,6 +61,9 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                             ],
                             'value' => [
                                 'description' => 'For "add": the element to insert. For "update": object with properties to merge.',
+                            ],
+                            'preset' => [
+                                'description' => 'For "preset": the preset to apply, as its template ID or its title.',
                             ],
                         ],
                     ],

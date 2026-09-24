@@ -169,7 +169,14 @@ final class ElementContext
             }
 
             try {
-                $cache[$type] = ControlSurface::cssProperties($schema->getSurface($type));
+                // Cached only: this closure runs inside validation, which write
+                // tools run before saving, and building a surface there would
+                // fire cs_before_late_data mid-save. An uncached type simply
+                // yields no lint until a read path (get_element_schema) has
+                // warmed it.
+                $surface = $schema->getCachedSurface($type);
+
+                $cache[$type] = $surface === null ? [] : ControlSurface::cssProperties($surface);
             } catch (\Throwable) {
                 $cache[$type] = [];
             }

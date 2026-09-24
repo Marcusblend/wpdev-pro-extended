@@ -97,8 +97,11 @@ final class HeaderRecipes
             '_modules' => [$nav],
         ];
 
+        $megaIndex = null;
+
         if ($withMega) {
             $navGroup['_modules'][] = self::panel($options);
+            $megaIndex = array_key_last($navGroup['_modules']);
         }
 
         if (($options['collapsed'] ?? true) !== false) {
@@ -111,6 +114,14 @@ final class HeaderRecipes
             ];
             $nav['hide_bp'] = 'xs sm md';
             $navGroup['_modules'][0] = $nav;
+
+            // The mega panel belongs to the desktop navigation that opens it,
+            // so it hides on the same breakpoints. Without this it rendered
+            // beside the mobile toggle, and its 60em width overflowed the
+            // viewport the moment it opened.
+            if ($megaIndex !== null) {
+                $navGroup['_modules'][$megaIndex]['hide_bp'] = 'xs sm md';
+            }
         }
 
         $container['_modules'][] = $navGroup;

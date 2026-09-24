@@ -107,6 +107,18 @@ final class ImportTco implements ToolInterface, AnnotatedToolInterface
                 continue;
             }
 
+            $meta = is_array($data['meta'] ?? null) ? $data['meta'] : [];
+
+            // An archive is someone else's file. Holding its templates to the
+            // same code rule as create_template keeps a .tco from being the way
+            // customJS reaches a document the importer could not write directly.
+            $codeReason = TemplateGateway::codeReason($meta);
+
+            if ($codeReason !== null) {
+                $skipped[] = ['title' => $title, 'identifier' => TemplateIdentifier::format($type, $subType), 'reason' => $codeReason];
+                continue;
+            }
+
             $planned[] = [
                 'title'      => is_string($titles[$title] ?? null) ? (string) $titles[$title] : $title,
                 'from_title' => $title,
@@ -114,7 +126,7 @@ final class ImportTco implements ToolInterface, AnnotatedToolInterface
                 'sub_type'   => $subType,
                 'identifier' => TemplateIdentifier::format($type, $subType),
                 'kind'       => TemplateIdentifier::kind($type, $subType),
-                'meta'       => is_array($data['meta'] ?? null) ? $data['meta'] : [],
+                'meta'       => $meta,
             ];
         }
 

@@ -424,6 +424,10 @@ final class CreateComponent implements ToolInterface, AnnotatedToolInterface
 
     public function requiredCapability(): string
     {
-        return 'edit_posts';
+        // This writes a cs_global_block document with caller-supplied element
+        // data, the same object `create_document` creates — and a component
+        // renders wherever it is inserted, site-wide. Two doors to the same
+        // thing cannot have different locks.
+        return 'manage_options';
     }
 }

@@ -206,6 +206,26 @@ final class SchemaExtractor
      *
      * @return array{panels: array<int, array<string, string>>, controls: array<int, array<string, mixed>>}
      */
+    /**
+     * The control surface for a type, but only if it is already cached.
+     *
+     * Building one reaches into Cornerstone's inspector data, which means
+     * entering builder context and firing `cs_before_late_data`. That is a read
+     * path's business: doing it inside a save marks the save request as a
+     * builder request, which is what BuilderContext promises never to do. The
+     * css lint takes this instead, so a cold cache costs it a warning rather
+     * than changing how the save behaves — and a deploy no longer builds a
+     * surface for every element type in the document.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function getCachedSurface(string $type): ?array
+    {
+        $cached = get_transient(self::SURFACE_PREFIX . md5($type));
+
+        return is_array($cached) ? $cached : null;
+    }
+
     public function getSurface(string $type): array
     {
         $key = self::SURFACE_PREFIX . md5($type);
@@ -228,9 +248,14 @@ final class SchemaExtractor
 
         if (! in_array($key, $index, true)) {
             $index[] = $key;
-            set_transient(self::SURFACE_INDEX, $index, self::CACHE_TTL);
         }
 
+        // The index has to outlive every surface it tracks. Writing it only
+        // when a new key appeared let it expire first: clearCache() then read
+        // an empty index, deleted nothing, reported success, and get_element_schema
+        // kept serving a surface captured before the Cornerstone update. Re-saving
+        // it alongside the surface keeps its TTL at least as long as theirs.
+        set_transient(self::SURFACE_INDEX, $index, self::CACHE_TTL);
         set_transient($key, $surface, self::CACHE_TTL);
 
         return $surface;

@@ -205,6 +205,17 @@ final class PlatformSnapshot
     private function themeVersion(): ?string
     {
         $theme = wp_get_theme();
+
+        // Pro sites almost always run a child theme, and wp_get_theme() returns
+        // the active one — so reading it here reported the child's version and
+        // the baseline never noticed a Themeco release. Ask the parent when
+        // there is one; that is the Pro version the rest of the snapshot means.
+        $parent = $theme->parent();
+
+        if ($parent instanceof \WP_Theme) {
+            $theme = $parent;
+        }
+
         $version = $theme->get('Version');
 
         return is_string($version) && $version !== '' ? $version : null;

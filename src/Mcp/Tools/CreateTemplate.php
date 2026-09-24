@@ -6,6 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 use ProExtended\Templates\TemplateGateway;
@@ -180,6 +181,8 @@ final class CreateTemplate implements ToolInterface, AnnotatedToolInterface
                 throw new \InvalidArgumentException('A preset with no settings would apply nothing. Pass the element keys it should set in atts.');
             }
 
+            $this->assertMayStoreCode($content);
+
             return $content;
         }
 
@@ -187,7 +190,25 @@ final class CreateTemplate implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException('A block or document template\'s content is {"elements": [...]} (or a document\'s regions).');
         }
 
+        $this->assertMayStoreCode($content);
+
         return $content;
+    }
+
+    /**
+     * Refuse to store code the author is not trusted to write.
+     *
+     * `TemplateGateway::create()` enforces this for every caller; running it
+     * here as well means a dry run says the write would be refused instead of
+     * reporting what it would have written.
+     *
+     * @param array<string, mixed> $content
+     *
+     * @throws ToolPermissionException
+     */
+    private function assertMayStoreCode(array $content): void
+    {
+        TemplateGateway::assertMayStoreCode($content);
     }
 
     /**

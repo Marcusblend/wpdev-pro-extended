@@ -198,7 +198,7 @@ final class LayoutService
 
         $backupId = $this->uniqueBackupId($backups);
 
-        $backups[$backupId] = array_merge(
+        $entry = array_merge(
             array_intersect_key($extra, array_flip(['post_title', 'post_name', 'source_tool'])),
             [
                 'source'     => $source,
@@ -206,6 +206,23 @@ final class LayoutService
                 'created_at' => gmdate('c'),
             ]
         );
+
+        // A page keeps its layout in _cornerstone_data and its header, footer
+        // and custom code in _cornerstone_settings. Backing up only the first
+        // made update_document_settings' promise false: restore_layout put the
+        // elements back and left the settings it had just changed. Read raw,
+        // like the data above, so the restore is byte-for-byte.
+        if ($source === 'post_meta') {
+            $rawSettings = $wpdb->get_var($wpdb->prepare(
+                "SELECT meta_value FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_cornerstone_settings' LIMIT 1",
+                $postId
+            ));
+
+            $entry['settings'] = $rawSettings;
+            $entry['had_settings'] = $rawSettings !== null;
+        }
+
+        $backups[$backupId] = $entry;
 
         // Keep only the most recent backups.
         if (count($backups) > self::MAX_BACKUPS) {
@@ -298,6 +315,35 @@ final class LayoutService
                     $postId,
                     $wpdb->last_error !== '' ? $wpdb->last_error : 'unknown database error'
                 ));
+            }
+
+            // Older backups predate the settings snapshot; they carry no
+            // 'had_settings' key and are restored exactly as before.
+            if (($backup['had_settings'] ?? false) === true && is_string($backup['settings'] ?? null)) {
+                $settingsExist = (int) $wpdb->get_var($wpdb->prepare(
+                    "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_cornerstone_settings'",
+                    $postId
+                ));
+
+                if ($settingsExist > 0) {
+                    $wpdb->update(
+                        $wpdb->postmeta,
+                        ['meta_value' => $backup['settings']],
+                        ['post_id' => $postId, 'meta_key' => '_cornerstone_settings'],
+                        ['%s'],
+                        ['%d', '%s']
+                    );
+                } else {
+                    $wpdb->insert(
+                        $wpdb->postmeta,
+                        [
+                            'post_id'    => $postId,
+                            'meta_key'   => '_cornerstone_settings',
+                            'meta_value' => $backup['settings'],
+                        ],
+                        ['%d', '%s', '%s']
+                    );
+                }
             }
 
             // $wpdb bypasses the object cache, so the old value would keep being

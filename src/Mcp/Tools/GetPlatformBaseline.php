@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Mcp\ToolPermissionException;
+
 use ProExtended\Site\PlatformBaseline;
 use ProExtended\Site\PlatformSnapshot;
 use ProExtended\Support\Args;
@@ -98,6 +100,17 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
         }
 
         if ($save) {
+            // Storing the baseline overwrites the drift history every later
+            // call is compared against, so it is not something a plain editor
+            // does by passing a flag. The tool stays readable at edit_posts;
+            // only the write asks for more.
+            if (! current_user_can('manage_options')) {
+                throw new ToolPermissionException(
+                    'Saving the platform baseline requires the manage_options capability. '
+                    . 'Call without save: true to read the current platform without storing it.'
+                );
+            }
+
             update_option(PlatformBaseline::OPTION, $current, false);
             $result['saved'] = true;
             $result['saved_at'] = $current['taken_at'];
@@ -108,7 +121,10 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
 
     public function annotations(): array
     {
-        return Annotations::read('Get Platform Baseline');
+        // Not read-only: save: true writes the stored baseline. A client that
+        // auto-approves read-only tools would otherwise overwrite the drift
+        // history this tool exists to provide, without asking.
+        return Annotations::write('Get Platform Baseline', false, true);
     }
 
     public function requiredCapability(): string
