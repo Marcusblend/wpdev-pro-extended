@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ProExtended\Settings;
 
+use ProExtended\Cornerstone\DocumentAssets;
+
 /**
  * Decides what a theme option write may change, before anything is written.
  *
@@ -92,6 +94,8 @@ final class ThemeOptionsWriter
                 continue;
             }
 
+            $value = self::normalizeValue($key, $value);
+
             $was = $current[$key] ?? null;
 
             if (self::same($was, $value)) {
@@ -133,8 +137,38 @@ final class ThemeOptionsWriter
     {
         return match ($key) {
             TwigTemplates::OPTION => TwigTemplates::errors($value),
+            DocumentAssets::OPTION_SCRIPTS, DocumentAssets::OPTION_STYLES => DocumentAssets::optionErrors($key, $value),
             default               => [],
         };
+    }
+
+    /**
+     * A validated value completed the way the builder stores it (Custom
+     * Assets items take the list control's defaults).
+     */
+    public static function normalizeValue(string $key, mixed $value): mixed
+    {
+        return match ($key) {
+            DocumentAssets::OPTION_SCRIPTS => DocumentAssets::scripts($value, $key),
+            DocumentAssets::OPTION_STYLES  => DocumentAssets::styles($value, $key),
+            default                        => $value,
+        };
+    }
+
+    /**
+     * Keys whose writes need Cornerstone's Custom Assets permission.
+     *
+     * @param  array<int, array<string, mixed>> $writes plan()['writes']
+     */
+    public static function touchesDocumentAssets(array $writes): bool
+    {
+        foreach ($writes as $write) {
+            if (in_array(self::baseKey((string) ($write['key'] ?? '')), [DocumentAssets::OPTION_SCRIPTS, DocumentAssets::OPTION_STYLES], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isStorable(mixed $value): bool

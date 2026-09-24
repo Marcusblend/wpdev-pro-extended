@@ -222,6 +222,9 @@ final class LayoutService
             $entry['had_settings'] = $rawSettings !== null;
         }
 
+        // Custom Assets live in their own post meta; keep them with the backup.
+        $entry = \ProExtended\Cornerstone\DocumentAssets::addToBackup($postId, $entry);
+
         $backups[$backupId] = $entry;
 
         // Keep only the most recent backups.
@@ -382,6 +385,9 @@ final class LayoutService
                 $this->restorePostFields($postId, $backup);
             }
         }
+
+        // Custom Assets meta, when the backup recorded it (1.5 and later).
+        \ProExtended\Cornerstone\DocumentAssets::restoreFromBackup($postId, $backup);
 
         // Clear TSS cache.
         delete_post_meta($postId, '_cs_generated_tss');

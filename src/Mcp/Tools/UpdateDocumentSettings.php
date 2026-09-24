@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\DocumentAssets;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\DocumentSettings;
+use ProExtended\Cornerstone\Permissions;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Support\Args;
@@ -31,7 +33,7 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
 
     public function description(): string
     {
-        return 'Change some settings (and optionally the title, or a component\'s slug) of a Cornerstone header, footer, layout or component document without touching its elements. Settings not given keep their values. Backs up first; restore_layout with the returned backup_id restores the settings, title and slug. Returns before/after for each changed key.';
+        return 'Change some settings (and optionally the title, or a component\'s slug) of a Cornerstone header, footer, layout or component document without touching its elements. Settings not given keep their values. Backs up first; restore_layout with the returned backup_id restores the settings, title and slug. Returns before/after for each changed key. Custom Assets (Cornerstone 7.9) are settings too: customScripts, a list of {src, id, type ("" or "module"), deps, ver, async, defer, nomodule, in_footer}, and customStyles, a list of {src, id, rel, media}, loaded with this document (a component\'s load wherever it is used). src must be an https URL; missing item keys take the builder\'s defaults; [] removes them all. They need unfiltered_html and Cornerstone\'s global.document_assets permission. Site-wide assets are the theme options cs_custom_scripts and cs_custom_styles (update_theme_options).';
     }
 
     public function inputSchema(): array
@@ -46,7 +48,7 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
                 ],
                 'settings' => [
                     'type'        => 'object',
-                    'description' => 'Settings to change (same keys as create_document). Pass "assignments": [] to unassign.',
+                    'description' => 'Settings to change (same keys as create_document, plus customScripts and customStyles). Pass "assignments": [] to unassign.',
                 ],
                 'title' => [
                     'type'        => 'string',
@@ -89,7 +91,9 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
         }
 
         $isComponent = $this->gateway->isComponentDocType($docType);
-        $settings = DocumentSettings::validate($docType, Args::object($arguments, 'settings') ?? []);
+        $requested = Args::object($arguments, 'settings') ?? [];
+        $assets = self::takeAssets($requested);
+        $settings = DocumentSettings::validate($docType, $requested);
         $title = Args::string($arguments, 'title', null, 200);
         $slug = Args::string($arguments, 'slug', null, 200);
         $dryRun = Args::bool($arguments, 'dry_run', false);
@@ -146,12 +150,16 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
             }
         }
 
-        if ($settings === [] && $title === null && $slug === null) {
+        if ($settings === [] && $assets === [] && $title === null && $slug === null) {
             throw new \InvalidArgumentException('Nothing to change: pass settings, title or slug.');
         }
 
         if (DocumentSettings::hasCode($settings) && ! current_user_can('unfiltered_html')) {
             throw new ToolPermissionException('Setting customCSS or customJS requires the unfiltered_html capability.');
+        }
+
+        if ($assets !== []) {
+            self::assertCanManageAssets();
         }
 
         if ($isContent) {
@@ -170,6 +178,17 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
 
             if ($before !== $value) {
                 $changes[$key] = ['before' => $before, 'after' => $value];
+            }
+        }
+
+        if ($assets !== []) {
+            $storedAssets = DocumentAssets::forDocument($id, $current);
+            $currentAssets = [DocumentAssets::SETTING_SCRIPTS => $storedAssets['scripts'], DocumentAssets::SETTING_STYLES => $storedAssets['styles']];
+
+            foreach ($assets as $key => $value) {
+                if ($currentAssets[$key] !== $value) {
+                    $changes[$key] = ['before' => $currentAssets[$key], 'after' => $value];
+                }
             }
         }
 
@@ -205,6 +224,29 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
             'post_name'   => $post->post_name,
             'source_tool' => 'update_document_settings',
         ]);
+
+        // Asset meta first: the settings write below fires cs_save_document,
+        // and Cornerstone's DocumentAssets listener writes the meta back from
+        // the settings it just loaded — which must already be the new lists.
+        $assetChanges = array_intersect_key($changes, $assets);
+
+        if ($assetChanges !== []) {
+            DocumentAssets::write(
+                $id,
+                isset($assetChanges[DocumentAssets::SETTING_SCRIPTS]) ? $assets[DocumentAssets::SETTING_SCRIPTS] : null,
+                isset($assetChanges[DocumentAssets::SETTING_STYLES]) ? $assets[DocumentAssets::SETTING_STYLES] : null
+            );
+        }
+
+        $onlyAssets = array_diff_key($changes, $assets) === [];
+
+        if ($onlyAssets) {
+            $result['updated'] = true;
+            $result['write_path'] = $this->gateway->firePageSaved($id)['path'];
+            $result['backup_id'] = $backupId;
+
+            return $result;
+        }
 
         if ($isContent) {
             if ($title !== null) {
@@ -248,6 +290,49 @@ final class UpdateDocumentSettings implements ToolInterface, AnnotatedToolInterf
         $result['warnings'] = $write['warnings'];
 
         return $result;
+    }
+
+    /**
+     * Take the Custom Assets settings out of a settings map, checked and
+     * completed with the builder's item defaults.
+     *
+     * @param  array<string, mixed> $settings Changed in place: the asset keys are removed.
+     * @return array<string, array<int, array<string, mixed>>>
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function takeAssets(array &$settings): array
+    {
+        $assets = [];
+
+        if (array_key_exists(DocumentAssets::SETTING_SCRIPTS, $settings)) {
+            $assets[DocumentAssets::SETTING_SCRIPTS] = DocumentAssets::scripts($settings[DocumentAssets::SETTING_SCRIPTS]);
+            unset($settings[DocumentAssets::SETTING_SCRIPTS]);
+        }
+
+        if (array_key_exists(DocumentAssets::SETTING_STYLES, $settings)) {
+            $assets[DocumentAssets::SETTING_STYLES] = DocumentAssets::styles($settings[DocumentAssets::SETTING_STYLES]);
+            unset($settings[DocumentAssets::SETTING_STYLES]);
+        }
+
+        return $assets;
+    }
+
+    /**
+     * External scripts run on the site like any other script, and the
+     * builder only shows Custom Assets to users with global.document_assets.
+     *
+     * @throws ToolPermissionException
+     */
+    private static function assertCanManageAssets(): void
+    {
+        if (! current_user_can('unfiltered_html')) {
+            throw new ToolPermissionException('Setting customScripts or customStyles requires the unfiltered_html capability.');
+        }
+
+        if ((new Permissions())->userCan(DocumentAssets::PERMISSION) === false) {
+            throw new ToolPermissionException(sprintf('Cornerstone denies "%s" to this user, which Custom Assets need.', DocumentAssets::PERMISSION));
+        }
     }
 
     public function annotations(): array
