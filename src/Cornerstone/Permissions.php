@@ -23,9 +23,9 @@ final class Permissions
     /**
      * Tool name => the Cornerstone permission its work needs.
      *
-     * A tool that is absent from this map is not gated by Cornerstone, either
-     * because it reads something WordPress already governs (menus, media, site
-     * information) or because it only reports.
+     * Every registered tool is either here or in EXEMPT, and a unit test holds
+     * the two lists to the registry, so a new tool has to be placed in one of
+     * them on purpose.
      */
     public const TOOL_KEYS = [
         // Documents and layouts.
@@ -36,6 +36,8 @@ final class Permissions
         'update_document_settings' => 'layout',
         'restore_layout'           => 'layout',
         'backup_layout'            => 'layout',
+        'list_layouts'             => 'layout',
+        'get_layout'               => 'layout',
 
         // Components.
         'list_components'          => 'component',
@@ -44,12 +46,21 @@ final class Permissions
         // Globals.
         'set_colors'               => 'global.colors',
         'set_fonts'                => 'global.fonts',
-        'set_global_css'           => 'global.theme_options',
+        'set_global_css'           => 'global.edit_custom_css',
         'get_global_css'           => 'global.theme_options',
         'get_theme_options'        => 'global.theme_options',
         'update_theme_options'     => 'global.theme_options',
         'set_variables'            => 'global.variables',
         'set_global_parameters'    => 'global.theme_options',
+        'create_snapshot'          => 'global.theme_options',
+        'restore_snapshot'         => 'global.theme_options',
+        'list_settings_backups'    => 'global',
+        'restore_settings'         => 'global',
+        // Cornerstone's own dashboard saves the allowlist with manage_options
+        // alone, which the tool requires too; "global" is the family closest
+        // to it, so a role denied Cornerstone's global settings cannot widen
+        // what the site's loopers may call.
+        'set_api_allowlist'        => 'global',
 
         // Library.
         'list_templates'           => 'template',
@@ -58,9 +69,32 @@ final class Permissions
         'export_tco'               => 'template.manage_library',
         'import_tco'               => 'template.manage_library',
 
-        // Elements.
+        // Elements, and what the builder offers while editing them.
         'list_elements'            => 'element-library',
         'get_element_schema'       => 'element-library',
+        'validate_layout'          => 'element-library',
+        'list_prefabs'             => 'element-library',
+        'list_dynamic_content'     => 'element-library',
+        'render_preview'           => 'element-library',
+    ];
+
+    /**
+     * Tools deliberately not gated by a Cornerstone permission, and why.
+     */
+    public const EXEMPT = [
+        'list_menus'            => 'WordPress menus, governed by WordPress capabilities.',
+        'create_menu'           => 'WordPress menus, governed by WordPress capabilities.',
+        'update_menu'           => 'WordPress menus, governed by WordPress capabilities.',
+        'upload_media'          => 'The WordPress Media Library, governed by upload_files.',
+        'get_site_info'         => 'Site information; it reports the caller\'s Cornerstone permissions rather than needing one.',
+        'get_platform_baseline' => 'A fingerprint of the platform (versions, registries, key names), not of the site\'s content.',
+        'get_write_journal'     => 'Pro Extended\'s own record of its writes, not Cornerstone data.',
+        'clear_cache'           => 'Clears caches and changes no content; Cornerstone clears its own from the dashboard with manage_options alone.',
+        'list_colors'           => 'The palette every builder user sees in a colour picker; changing it (set_colors) is gated.',
+        'list_fonts'            => 'The fonts every builder user sees in a font picker; changing them (set_fonts) is gated.',
+        // Pending: the translation work gates this per document type and moves
+        // it into TOOL_KEYS; until then it keeps its WordPress checks.
+        'create_translation'    => 'Checks edit rights on the source post and the post type\'s publish capability itself.',
     ];
 
     /**

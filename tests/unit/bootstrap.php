@@ -22,6 +22,8 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
+require_once __DIR__ . '/stubs.php';
+
 final class T
 {
     public static int $passed = 0;

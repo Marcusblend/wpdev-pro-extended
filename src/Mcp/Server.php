@@ -311,6 +311,11 @@ TXT;
                 ],
             ]);
         } catch (\Throwable $e) {
+            // A write that failed is recorded too, with why.
+            if ($tool instanceof AnnotatedToolInterface && empty($this->annotationsFor($tool)['readOnlyHint'])) {
+                (new WriteJournal())->recordFailure($toolName, is_array($arguments) ? $arguments : [], $e);
+            }
+
             return $this->toolError($id, $toolName, $e);
         }
     }

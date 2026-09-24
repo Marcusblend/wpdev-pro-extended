@@ -104,3 +104,40 @@ $tree = MenuItems::tree([
 T::same(['Rentals', 'About'], array_column($tree, 'title'), 'top level is ordered by menu order');
 T::same(['Skis', 'Bikes'], array_column($tree[0]['children'], 'title'), 'children are nested and ordered');
 T::ok(! isset($tree[1]['children']), 'an item without children has no children key');
+
+// The parent every write sends ----------------------------------------------
+
+$existing = [12 => ['id' => 12, 'parent' => 5], 5 => ['id' => 5, 'parent' => 0]];
+T::same(5, MenuItems::parentId(null, 12, $existing), 'an update that names no parent keeps the item\'s own');
+T::same(0, MenuItems::parentId(0, 12, $existing), 'naming the top level moves it there');
+T::same(7, MenuItems::parentId(7, 12, $existing), 'naming another parent moves it there');
+T::same(0, MenuItems::parentId(null, 0, $existing), 'a new item with no parent goes at the top level');
+
+// Renaming a child through the gateway keeps it where it is --------------------
+
+WpStub::reset();
+WpStub::$menuItems = [
+    (object) ['menu' => 3, 'ID' => 5, 'title' => 'Rentals', 'url' => '/rentals/', 'menu_item_parent' => '0', 'menu_order' => 1, 'type' => 'custom', 'object' => 'custom', 'object_id' => 5, 'target' => '', 'classes' => [''], 'description' => '', 'attr_title' => '', 'xfn' => '', 'post_status' => 'publish'],
+    (object) ['menu' => 3, 'ID' => 12, 'title' => 'Skis', 'url' => '/skis/', 'menu_item_parent' => '5', 'menu_order' => 2, 'type' => 'custom', 'object' => 'custom', 'object_id' => 12, 'target' => '', 'classes' => [''], 'description' => '', 'attr_title' => '', 'xfn' => '', 'post_status' => 'publish'],
+];
+
+$gateway = new ProExtended\Menus\MenuGateway();
+$renamed = $gateway->apply(3, MenuItems::normalize([['op' => 'update', 'item' => 12, 'title' => 'Ski rentals']])['operations'], false, false);
+T::same([], $renamed['errors'], 'renaming a child item succeeds');
+T::same('5', (string) (WpStub::$menuWrites[0]['args']['menu-item-parent-id'] ?? 'missing'), 'and sends the parent it already has');
+T::same('Ski rentals', WpStub::$menuWrites[0]['args']['menu-item-title'] ?? null, 'with the new title');
+
+WpStub::$menuWrites = [];
+$twice = $gateway->apply(3, MenuItems::normalize([
+    ['op' => 'move', 'item' => 12, 'parent' => 0],
+    ['op' => 'update', 'item' => 12, 'title' => 'Skis'],
+])['operations'], false, false);
+T::same([], $twice['errors'], 'a move and then an update succeed');
+T::same(0, (int) WpStub::$menuWrites[1]['args']['menu-item-parent-id'], 'the update keeps the parent the move gave it in the same call');
+
+WpStub::$menuWrites = [];
+$preview = $gateway->apply(3, MenuItems::normalize([['op' => 'update', 'item' => 12, 'title' => 'X']])['operations'], true, false);
+T::same(5, $preview['applied'][0]['would_write']['menu-item-parent-id'] ?? null, 'a dry run shows the parent it would keep');
+T::same([], WpStub::$menuWrites, 'and writes nothing');
+
+WpStub::reset();

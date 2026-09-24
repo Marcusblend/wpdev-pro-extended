@@ -10,16 +10,17 @@ namespace ProExtended\Mcp\Tools;
 final class Annotations
 {
     /**
+     * @param  bool $openWorld Whether the tool can reach beyond the site, as rendering a looper that calls an external API does.
      * @return array{title: string, readOnlyHint: bool, destructiveHint: bool, idempotentHint: bool, openWorldHint: bool}
      */
-    public static function read(string $title): array
+    public static function read(string $title, bool $openWorld = false): array
     {
         return [
             'title'           => $title,
             'readOnlyHint'    => true,
             'destructiveHint' => false,
             'idempotentHint'  => true,
-            'openWorldHint'   => false,
+            'openWorldHint'   => $openWorld,
         ];
     }
 

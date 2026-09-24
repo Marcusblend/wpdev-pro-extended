@@ -17,11 +17,15 @@ use ProExtended\Support\SkipValidation;
 
 final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 {
+    /** Every operation patch() handles, and so every one the schema offers. */
+    public const OPS = ['add', 'remove', 'update', 'preset', 'move', 'duplicate', 'wrap', 'unwrap', 'prefab'];
+
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
         private readonly ?ElementContext $elements = null,
         private readonly ?TemplateGateway $templates = null,
+        private readonly ?Prefabs $prefabs = null,
     ) {}
 
     public function name(): string
@@ -31,7 +35,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. The editing operations: move takes "to", the path the element lands at; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name" (list_prefabs reports them), already configured. Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset changes only the keys the element\'s definition designates as style, so its content, label, ids and children stay its own, and it is refused when it is for a different element type. The editing operations: move takes "to", a path read in the tree as it is now: the element lands there and the one there moves down; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name", already configured (call list_prefabs with them first: a write takes the values that read cached). Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -53,7 +57,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                         'properties' => [
                             'op' => [
                                 'type' => 'string',
-                                'enum' => ['add', 'remove', 'update', 'preset'],
+                                'enum' => self::OPS,
                                 'description' => 'Operation type.',
                             ],
                             'path' => [
@@ -61,10 +65,22 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                                 'description' => 'JSON pointer path to the target element (e.g. "0._modules.0._modules.1").',
                             ],
                             'value' => [
-                                'description' => 'For "add": the element to insert. For "update": object with properties to merge.',
+                                'description' => 'For "add": the element to insert. For "update": object with properties to merge. For "wrap": the element to wrap with, including its _type.',
                             ],
                             'preset' => [
                                 'description' => 'For "preset": the preset to apply, as its template ID or its title.',
+                            ],
+                            'to' => [
+                                'type'        => 'string',
+                                'description' => 'For "move": the path the element lands at, read in the tree as it stands before the move (e.g. "0._modules.2").',
+                            ],
+                            'group' => [
+                                'type'        => 'string',
+                                'description' => 'For "prefab": the prefab\'s group, from list_prefabs.',
+                            ],
+                            'name' => [
+                                'type'        => 'string',
+                                'description' => 'For "prefab": the prefab\'s name, from list_prefabs.',
                             ],
                         ],
                     ],
@@ -75,7 +91,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                 ],
                 'stamp_new' => [
                     'type'        => 'boolean',
-                    'description' => 'Optional. Give elements inserted by "add" operations the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
+                    'description' => 'Optional. Give elements inserted by "add" operations, and the wrapper a "wrap" puts in, the migration (_m) and breakpoint (_bp_base) markers Cornerstone gives new elements, where missing. Default: true.',
                 ],
             ],
         ];
@@ -117,7 +133,6 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
         $total    = count($operations);
         $original = $data;
-        $errors   = [];
         $warnings = [];
         $post     = get_post($postId);
         $flat     = $post instanceof \WP_Post && $post->post_type === 'cs_global_block';
@@ -126,37 +141,9 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         // Apply every operation to an in-memory copy first. Nothing is written
         // unless all of them succeed, so a failed patch can never leave a
         // half-applied element tree on the post.
-        foreach ($operations as $index => $op) {
-            if (! is_array($op)) {
-                $errors[] = sprintf('Operation %s is not an object.', (string) $index);
-                continue;
-            }
-
-            $opType = $op['op'] ?? '';
-            $path   = $op['path'] ?? '';
-            $value  = $op['value'] ?? null;
-
-            if ($opType === 'add' && $stamper !== null && is_array($value)) {
-                $value = $this->stampInserted($stamper, $value, $flat);
-            }
-
-            try {
-                match ($opType) {
-                    'update' => $this->applyUpdate($data, $path, $value),
-                    'add'    => $this->applyAdd($data, $path, $value),
-                    'remove' => $this->applyRemove($data, $path),
-                    'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
-                    'move'      => $this->applyMove($data, $path, (string) ($op['to'] ?? '')),
-                    'duplicate' => $this->applyDuplicate($data, $path),
-                    'wrap'      => $this->applyWrap($data, $path, $value),
-                    'unwrap'    => $this->applyUnwrap($data, $path),
-                    'prefab'    => $this->applyPrefab($data, $path, (string) ($op['group'] ?? ''), (string) ($op['name'] ?? '')),
-                    default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', $opType)),
-                };
-            } catch (\Throwable $e) {
-                $errors[] = sprintf('Operation %s (%s): %s', (string) $index, (string) $opType, $e->getMessage());
-            }
-        }
+        $patched = $this->patch($data, $operations, $flat, $stamper);
+        $data    = $patched['data'];
+        $errors  = $patched['errors'];
 
         if (! empty($errors)) {
             return $this->result($postId, false, 0, $total, null, $warnings, $errors, null);
@@ -228,7 +215,62 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
     }
 
     /**
-     * Stamp what an "add" operation inserts: one element (with its children),
+     * Apply operations to layout data in memory, in order.
+     *
+     * Nothing is read from or written to the site here: execute() loads the
+     * layout, runs this, and saves only when it reports no errors. Public so
+     * the operations can be tested without a site.
+     *
+     * @param  array<mixed>             $data
+     * @param  array<int|string, mixed> $operations
+     * @return array{data: array<mixed>, errors: string[]}
+     */
+    public function patch(array $data, array $operations, bool $flat = false, ?ElementStamper $stamper = null): array
+    {
+        $errors = [];
+
+        foreach ($operations as $index => $op) {
+            if (! is_array($op)) {
+                $errors[] = sprintf('Operation %s is not an object.', (string) $index);
+                continue;
+            }
+
+            $opType = $op['op'] ?? '';
+            $path   = $op['path'] ?? '';
+            $value  = $op['value'] ?? null;
+
+            // What an operation brings in is new to the document and gets the
+            // markers Cornerstone gives a new element: the element "add"
+            // inserts, and the wrapper "wrap" puts around an existing one. The
+            // wrapper is stamped before the existing element goes inside it, so
+            // that element keeps exactly the markers it had.
+            if (($opType === 'add' || $opType === 'wrap') && $stamper !== null && is_array($value)) {
+                $value = $this->stampInserted($stamper, $value, $flat);
+            }
+
+            try {
+                match ($opType) {
+                    'update' => $this->applyUpdate($data, $path, $value),
+                    'add'    => $this->applyAdd($data, $path, $value),
+                    'remove' => $this->applyRemove($data, $path),
+                    'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
+                    'move'      => $this->applyMove($data, $path, (string) ($op['to'] ?? '')),
+                    'duplicate' => $this->applyDuplicate($data, $path),
+                    'wrap'      => $this->applyWrap($data, $path, $value),
+                    'unwrap'    => $this->applyUnwrap($data, $path),
+                    'prefab'    => $this->applyPrefab($data, $path, (string) ($op['group'] ?? ''), (string) ($op['name'] ?? '')),
+                    default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', is_scalar($opType) ? (string) $opType : gettype($opType))),
+                };
+            } catch (\Throwable $e) {
+                $errors[] = sprintf('Operation %s (%s): %s', (string) $index, is_scalar($opType) ? (string) $opType : gettype($opType), $e->getMessage());
+            }
+        }
+
+        return ['data' => $data, 'errors' => $errors];
+    }
+
+    /**
+     * Stamp what an "add" or "wrap" operation inserts: one element (with its children),
      * a list of elements, or, in a component document's flat map, a single
      * element whose children are ID strings.
      *
@@ -356,10 +398,71 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException(sprintf('That preset is for a "%s"; the element at "%s" is a "%s".', $forType, $path, $targetType));
         }
 
-        // The element's own identity and children are never part of a preset.
-        unset($atts['_id'], $atts['_modules'], $atts['_region'], $atts['_parent'], $atts['_c_id']);
+        $type = $targetType !== '' ? $targetType : $forType;
+        $designations = $this->elements?->designations($type) ?? [];
 
-        $target = array_merge($target, $atts);
+        if ($designations === []) {
+            throw new \RuntimeException(sprintf('The "%s" element\'s designations could not be read from Cornerstone\'s registry, so its style settings cannot be told from its content. Nothing was applied.', $type));
+        }
+
+        $target = self::mergePreset($target, $atts, $designations);
+    }
+
+    /**
+     * Apply a preset's settings to an element: its style settings only.
+     *
+     * A preset restyles an element; it does not rewrite it. Only keys the
+     * element's definition designates as style are taken, so its content,
+     * label, markers, component ids and children stay its own. Responsive
+     * values (`_bp_data<tag>`) are filtered the same way and merged key by
+     * key into the element's own, so a responsive value the preset does not
+     * set is kept.
+     *
+     * @param  array<string, mixed>  $element
+     * @param  array<string, mixed>  $atts         The preset's stored settings.
+     * @param  array<string, string> $designations Key => designation, from the element's definition.
+     * @return array<string, mixed>
+     */
+    public static function mergePreset(array $element, array $atts, array $designations): array
+    {
+        $isStyle = static fn (mixed $key): bool => is_string($key)
+            && is_string($designations[$key] ?? null)
+            && str_starts_with($designations[$key], 'style');
+
+        $style = [];
+
+        foreach ($atts as $key => $value) {
+            if (is_string($key) && preg_match('/^_bp_data(\d+_\d+)$/', $key, $match) === 1) {
+                if (! is_array($value)) {
+                    continue;
+                }
+
+                $responsive = array_filter($value, $isStyle, ARRAY_FILTER_USE_KEY);
+
+                if ($responsive === []) {
+                    continue;
+                }
+
+                $base = $element['_bp_base'] ?? null;
+
+                if (is_string($base) && $base !== '' && $base !== $match[1]) {
+                    throw new \InvalidArgumentException(sprintf('That preset\'s responsive values were written for breakpoints "%s" and the element is on "%s", so Cornerstone would ignore them.', $match[1], $base));
+                }
+
+                $style[$key] = array_merge(is_array($element[$key] ?? null) ? $element[$key] : [], $responsive);
+                continue;
+            }
+
+            if ($isStyle($key)) {
+                $style[$key] = $value;
+            }
+        }
+
+        if ($style === []) {
+            throw new \InvalidArgumentException('That preset holds no style settings for this element.');
+        }
+
+        return array_merge($element, $style);
     }
 
     /**
@@ -402,8 +505,11 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
     /**
      * Move an element to another place in the tree.
      *
-     * "to" is where it lands, as a path: the element currently there is pushed
-     * down, the way dropping one above another behaves in the builder.
+     * "to" is read in the tree as it stands before the move, the way dropping
+     * an element in the builder reads it: the element lands where the one at
+     * "to" is now, and that one moves down. Taking the element out first
+     * shifts every later sibling up by one, so "to" is translated into the
+     * tree without the element before it is inserted.
      */
     private function applyMove(array &$data, string $path, string $to): void
     {
@@ -411,11 +517,18 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException('A move needs "to": the path it should land at.');
         }
 
-        if ($to === $path) {
+        $source = array_values($this->parsePath($path));
+        $target = array_values($this->parsePath($to));
+
+        if ($source === []) {
+            throw new \InvalidArgumentException('A move needs "path": the element to move.');
+        }
+
+        if ($source === $target) {
             return;
         }
 
-        if (str_starts_with($to, $path . '.')) {
+        if (array_slice($target, 0, count($source)) === $source) {
             throw new \InvalidArgumentException(sprintf('"%s" is inside "%s", so the element cannot move into itself.', $to, $path));
         }
 
@@ -425,21 +538,69 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException(sprintf('Path "%s" does not point to an element.', $path));
         }
 
+        // Resolve the destination against the tree as it stands, before
+        // anything is taken out of it.
+        $targetParentPath = implode('.', array_slice($target, 0, -1));
+        $targetIndex = end($target);
+        $targetParent = $this->resolvePointer($data, $targetParentPath);
+
+        if (! is_array($targetParent)) {
+            throw new \InvalidArgumentException(sprintf('Parent path "%s" does not point to an array.', $targetParentPath));
+        }
+
+        if (is_numeric($targetIndex) && ((int) $targetIndex < 0 || (int) $targetIndex > count($targetParent))) {
+            throw new \InvalidArgumentException(sprintf('"%s" is past the end of its list, which holds %d.', $to, count($targetParent)));
+        }
+
+        $landing = implode('.', self::afterRemoval($source, $target));
         $moving = $node;
 
-        // Remove first, then insert: with both paths in the same list, taking
-        // the element out shifts anything after it, and the destination has to
-        // be read in the tree as it stands once it is gone.
         $this->applyRemove($data, $path);
 
         try {
-            $this->applyAdd($data, $to, $moving);
+            $this->applyAdd($data, $landing, $moving);
         } catch (\Throwable $e) {
             // Put it back rather than leaving the element nowhere.
             $this->applyAdd($data, $path, $moving);
 
             throw new \InvalidArgumentException(sprintf('The element could not be moved to "%s": %s', $to, $e->getMessage()));
         }
+    }
+
+    /**
+     * Where a path points once the element at another path has been taken out.
+     *
+     * Removing an element shifts its later siblings up by one, so a target
+     * that runs through one of them (a later sibling itself, or anything
+     * inside one) has that index lowered. Everything else is unchanged.
+     *
+     * @param  string[] $removed Segments of the path taken out.
+     * @param  string[] $target  Segments of the path to translate.
+     * @return string[]
+     */
+    public static function afterRemoval(array $removed, array $target): array
+    {
+        $depth = count($removed) - 1;
+
+        if ($depth < 0 || count($target) <= $depth) {
+            return $target;
+        }
+
+        $removedIndex = $removed[$depth];
+        $targetIndex = $target[$depth];
+
+        if (
+            array_slice($target, 0, $depth) !== array_slice($removed, 0, $depth)
+            || ! is_numeric($removedIndex)
+            || ! is_numeric($targetIndex)
+            || (int) $targetIndex <= (int) $removedIndex
+        ) {
+            return $target;
+        }
+
+        $target[$depth] = (string) ((int) $targetIndex - 1);
+
+        return $target;
     }
 
     /**
@@ -528,6 +689,10 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     /**
      * Insert one of Cornerstone's prefab elements by name.
+     *
+     * The values come from the cache list_prefabs fills, never from the
+     * registry: reading the registry enters Cornerstone's builder context,
+     * and this runs inside a write.
      */
     private function applyPrefab(array &$data, string $path, string $group, string $name): void
     {
@@ -535,10 +700,21 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException('A prefab operation needs "group" and "name". list_prefabs reports both.');
         }
 
-        $values = (new Prefabs())->values($group, $name);
+        $prefabs = $this->prefabs ?? new Prefabs();
+        $values = $prefabs->cached($group, $name);
 
         if ($values === null) {
-            throw new \InvalidArgumentException(sprintf('No prefab "%s" in group "%s". Use list_prefabs to see them.', $name, $group));
+            if ($prefabs->cachedAll()) {
+                throw new \InvalidArgumentException(sprintf('No prefab "%s" in group "%s". Use list_prefabs to see them.', $name, $group));
+            }
+
+            throw new \InvalidArgumentException(sprintf(
+                'Prefab "%s" in group "%s" has not been read yet. Its values come from Cornerstone\'s builder, which a write must not enter, so call list_prefabs with group "%s" and name "%s" first and then run this operation again.',
+                $name,
+                $group,
+                $group,
+                $name
+            ));
         }
 
         $this->applyAdd($data, $path, $values);

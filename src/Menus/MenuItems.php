@@ -368,6 +368,26 @@ final class MenuItems
     }
 
     /**
+     * The parent an add or update writes.
+     *
+     * wp_update_nav_menu_item() reads a missing menu-item-parent-id as 0, so
+     * one has to be sent every time: the parent the operation names, or, for
+     * an existing item, the one it already has. A new item with none named
+     * goes at the top level.
+     *
+     * @param int|null                         $named    The parent the operation names, resolved to an ID (0 for the top level), or null.
+     * @param array<int, array<string, mixed>> $existing The menu's items by ID, each with its current parent.
+     */
+    public static function parentId(?int $named, int $itemId, array $existing): int
+    {
+        if ($named !== null) {
+            return $named;
+        }
+
+        return $itemId > 0 ? (int) ($existing[$itemId]['parent'] ?? 0) : 0;
+    }
+
+    /**
      * Build the nested tree a menu's flat item list describes, for reporting.
      *
      * @param  array<int, array<string, mixed>> $items Each with id, parent, order.

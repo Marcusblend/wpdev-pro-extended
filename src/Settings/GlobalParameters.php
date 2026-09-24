@@ -17,6 +17,12 @@ namespace ProExtended\Settings;
  * Write per-breakpoint values without it and the parameters exist, the elements
  * bind to them, and nothing renders.
  *
+ * The schema is kept in the shape it came in. Decoding JSON into PHP arrays
+ * turns every {} into [], and the builder reads [] as a list: a schema string
+ * is therefore stored exactly as given, and a schema that arrives already
+ * decoded is encoded with its objects put back where the schema always has
+ * one (encodeSchema()).
+ *
  * Pure PHP with no WordPress calls, so it is unit-tested without a site.
  */
 final class GlobalParameters
@@ -83,7 +89,16 @@ final class GlobalParameters
             }
         }
 
-        $encoded = (string) json_encode($schema, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        // A string is written back byte for byte: decoding and re-encoding it
+        // would turn {} into [] and change its escaping, so a write that only
+        // touched the values would rewrite the schema.
+        $encoded = is_string($json) ? $json : self::encodeSchema($schema);
+
+        if ($encoded === null) {
+            $errors[] = 'json could not be encoded as JSON.';
+
+            return ['json' => '', 'data' => [], 'parameters' => [], 'responsive' => [], 'errors' => $errors, 'warnings' => $warnings];
+        }
 
         return [
             'json'       => $encoded,
@@ -93,6 +108,69 @@ final class GlobalParameters
             'errors'     => $errors,
             'warnings'   => $warnings,
         ];
+    }
+
+    /**
+     * Encode a _p_json parameter schema without losing its objects.
+     *
+     * A string is returned as given. An array has usually been through
+     * json_decode(..., true), which turns {} into []; the places a schema is
+     * always an object get their {} back: the top level, a group's params
+     * (and the value of a "name#" or "name[]" key, which is one), each
+     * parameter's definition, and a group's initial value. A list stays a
+     * list, so a select's options or a group[]'s initial rows are untouched.
+     *
+     * @param  array<mixed>|string $schema
+     * @return string|null Null when the array cannot be encoded.
+     */
+    public static function encodeSchema(array|string $schema): ?string
+    {
+        if (is_string($schema)) {
+            return $schema;
+        }
+
+        $encoded = json_encode(self::objects($schema, true), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+
+        return is_string($encoded) ? $encoded : null;
+    }
+
+    /**
+     * @param bool $params Whether $node is a map of parameters (true) or one parameter's definition.
+     */
+    private static function objects(mixed $node, bool $params): mixed
+    {
+        if (! is_array($node)) {
+            return $node;
+        }
+
+        if ($node === []) {
+            return new \stdClass();
+        }
+
+        if (array_is_list($node)) {
+            return $node;
+        }
+
+        if ($params) {
+            foreach ($node as $name => $definition) {
+                $isGroup = str_ends_with((string) $name, '#') || str_ends_with((string) $name, '[]');
+                $node[$name] = self::objects($definition, $isGroup);
+            }
+
+            return $node;
+        }
+
+        $type = is_string($node['type'] ?? null) ? $node['type'] : 'text';
+
+        if (array_key_exists('params', $node)) {
+            $node['params'] = self::objects($node['params'], true);
+        }
+
+        if ($type === 'group' && ($node['initial'] ?? null) === []) {
+            $node['initial'] = new \stdClass();
+        }
+
+        return $node;
     }
 
     /**

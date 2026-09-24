@@ -25,32 +25,34 @@ final class VariableItems
     /**
      * Merge a set of variables into the stored list.
      *
+     * Only what the call names is validated and changed. Every other stored
+     * item is carried through exactly as it is, in its place, whatever its id
+     * looks like: an item this plugin would not have written (a name the
+     * builder allowed, a duplicate, a leading "--") still belongs to the site,
+     * and a write about something else must not drop or rename it. A stored
+     * item is matched by its name with any leading "--" dropped, and keeps its
+     * own spelling of the id when its value changes.
+     *
      * @param  array<int, mixed>    $stored  The list as it is on the site.
      * @param  array<int|string, mixed> $updates Variables to add or change: a list of
      *                                        {id, value, breakpoints?} or a map of id => value.
      * @param  string[]             $remove  IDs to drop.
-     * @return array{items: array<int, array<string, mixed>>, added: string[], changed: string[], removed: string[], errors: string[]}
+     * @return array{items: array<int, mixed>, added: string[], changed: string[], removed: string[], errors: string[]}
      */
     public static function merge(array $stored, array $updates, array $remove = []): array
     {
         $errors = [];
-        $items = [];
-        $order = [];
+        $items = array_values($stored);
 
-        foreach ($stored as $item) {
-            if (! is_array($item)) {
-                continue;
+        // Normalised name => the positions of the stored items it matches.
+        $index = [];
+
+        foreach ($items as $position => $item) {
+            $id = is_array($item) ? self::normalizeId($item['id'] ?? '') : null;
+
+            if ($id !== null) {
+                $index[$id][] = $position;
             }
-
-            $id = self::normalizeId($item['id'] ?? '');
-
-            if ($id === null) {
-                continue;
-            }
-
-            $item['id'] = $id;
-            $items[$id] = $item;
-            $order[] = $id;
         }
 
         $added = [];
@@ -71,32 +73,42 @@ final class VariableItems
                 continue;
             }
 
-            $entry = $items[$id] ?? ['id' => $id];
-            $existed = isset($items[$id]);
-            $entry['id'] = $id;
-            $entry['value'] = (string) $value;
-
             $breakpoints = $update['breakpoints'] ?? null;
 
-            if ($breakpoints !== null) {
-                if (! is_array($breakpoints)) {
-                    $errors[] = sprintf('Variable "%s": breakpoints must be a list of values, one per breakpoint.', $id);
-                    continue;
-                }
-
-                $entry['_bp'] = ['value' => array_values(array_map(static fn (mixed $v): string => is_scalar($v) ? (string) $v : '', $breakpoints))];
+            if ($breakpoints !== null && ! is_array($breakpoints)) {
+                $errors[] = sprintf('Variable "%s": breakpoints must be a list of values, one per breakpoint.', $id);
+                continue;
             }
 
-            if ($existed) {
-                if (($items[$id]['value'] ?? null) !== $entry['value'] || ($items[$id]['_bp'] ?? null) !== ($entry['_bp'] ?? null)) {
-                    $changed[] = $id;
+            $apply = static function (array $entry) use ($value, $breakpoints): array {
+                $entry['value'] = (string) $value;
+
+                if ($breakpoints !== null) {
+                    $entry['_bp'] = ['value' => array_values(array_map(static fn (mixed $v): string => is_scalar($v) ? (string) $v : '', $breakpoints))];
                 }
-            } else {
+
+                return $entry;
+            };
+
+            if (! isset($index[$id])) {
+                $items[] = $apply(['id' => $id]);
+                $index[$id] = [array_key_last($items)];
                 $added[] = $id;
-                $order[] = $id;
+                continue;
             }
 
-            $items[$id] = $entry;
+            foreach ($index[$id] as $position) {
+                $current = $items[$position];
+                $next = $apply($current);
+
+                if (($current['value'] ?? null) !== $next['value'] || ($current['_bp'] ?? null) !== ($next['_bp'] ?? null)) {
+                    $items[$position] = $next;
+
+                    if (! in_array($id, $changed, true) && ! in_array($id, $added, true)) {
+                        $changed[] = $id;
+                    }
+                }
+            }
         }
 
         $removed = [];
@@ -104,24 +116,20 @@ final class VariableItems
         foreach ($remove as $id) {
             $id = self::normalizeId($id);
 
-            if ($id === null || ! isset($items[$id])) {
+            if ($id === null || ! isset($index[$id])) {
                 continue;
             }
 
-            unset($items[$id]);
+            foreach ($index[$id] as $position) {
+                unset($items[$position]);
+            }
+
+            unset($index[$id]);
             $removed[] = $id;
         }
 
-        $final = [];
-
-        foreach ($order as $id) {
-            if (isset($items[$id]) && ! in_array($id, array_column($final, 'id'), true)) {
-                $final[] = $items[$id];
-            }
-        }
-
         return [
-            'items'   => $final,
+            'items'   => array_values($items),
             'added'   => $added,
             'changed' => $changed,
             'removed' => $removed,

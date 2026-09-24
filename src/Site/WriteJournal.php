@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace ProExtended\Site;
 
+use ProExtended\Support\Args;
+
 /**
  * A record of what this plugin changed, and when.
  *
  * Across a hundred sites the question that comes up is not "what can this
  * write" but "what did it write, on this site, last Tuesday". Backups answer
  * that for the handful of things they cover; this answers it for everything,
- * cheaply: one line per write, with the tool, who ran it, what it touched and
- * whether it was a dry run.
+ * cheaply: one line per write, with the tool, who ran it, what it touched,
+ * whether it was a dry run, and, for a write that failed, why.
  *
  * Kept in a single non-autoloaded option, newest last, capped. Nothing here is
  * load-bearing — a journal write that fails must never fail the write it was
@@ -28,6 +30,19 @@ final class WriteJournal
     private const TARGET_KEYS = ['post_id', 'document_id', 'template_id', 'menu', 'attachment_id'];
 
     /**
+     * Tools that preview unless a flag says to write, and that flag. Every
+     * other tool writes unless its dry_run is true.
+     */
+    public const PREVIEW_UNLESS = [
+        'restore_snapshot'      => 'confirm',
+        'import_tco'            => 'confirm',
+        'get_platform_baseline' => 'save',
+    ];
+
+    /** How much of a failure's message is kept. */
+    private const ERROR_LENGTH = 500;
+
+    /**
      * Record one write.
      *
      * @param array<string, mixed> $arguments
@@ -36,12 +51,7 @@ final class WriteJournal
     public function record(string $tool, array $arguments, mixed $result): void
     {
         try {
-            $entry = [
-                'at'      => gmdate('c'),
-                'tool'    => $tool,
-                'user'    => get_current_user_id(),
-                'dry_run' => ! empty($arguments['dry_run']),
-            ];
+            $entry = $this->entry($tool, $arguments);
 
             $target = self::targetOf($arguments, $result);
 
@@ -55,17 +65,95 @@ final class WriteJournal
                 $entry['summary'] = $summary;
             }
 
-            $journal = $this->all();
-            $journal[] = $entry;
-
-            if (count($journal) > self::LIMIT) {
-                $journal = array_slice($journal, -self::LIMIT);
-            }
-
-            update_option(self::OPTION, $journal, false);
+            $this->append($entry);
         } catch (\Throwable) {
             // A journal is never worth failing a write over.
         }
+    }
+
+    /**
+     * Record a write that threw, with its message.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public function recordFailure(string $tool, array $arguments, \Throwable $error): void
+    {
+        try {
+            $entry = $this->entry($tool, $arguments);
+            $entry['failed'] = true;
+            $entry['error'] = self::errorText($error);
+
+            $target = self::targetOf($arguments, null);
+
+            if ($target !== null) {
+                $entry['target'] = $target;
+            }
+
+            $this->append($entry);
+        } catch (\Throwable) {
+            // A journal is never worth failing a write over.
+        }
+    }
+
+    /**
+     * Whether a call was a preview, read from the tool's own flag the way the
+     * tool reads it: dry_run for most tools, and for the ones that preview
+     * until told otherwise, the flag that makes them write. "false" is false.
+     *
+     * @param array<string, mixed> $arguments
+     */
+    public static function isDryRun(string $tool, array $arguments): bool
+    {
+        try {
+            if (isset(self::PREVIEW_UNLESS[$tool])) {
+                return ! Args::bool($arguments, self::PREVIEW_UNLESS[$tool], false);
+            }
+
+            return Args::bool($arguments, 'dry_run', false);
+        } catch (\InvalidArgumentException) {
+            // The tool refuses a flag it cannot read, so nothing was previewed.
+            return false;
+        }
+    }
+
+    public static function errorText(\Throwable $error): string
+    {
+        $message = trim($error->getMessage());
+
+        if ($message === '') {
+            $message = get_class($error);
+        }
+
+        return strlen($message) > self::ERROR_LENGTH ? substr($message, 0, self::ERROR_LENGTH) . '…' : $message;
+    }
+
+    /**
+     * @param  array<string, mixed> $arguments
+     * @return array<string, mixed>
+     */
+    private function entry(string $tool, array $arguments): array
+    {
+        return [
+            'at'      => gmdate('c'),
+            'tool'    => $tool,
+            'user'    => get_current_user_id(),
+            'dry_run' => self::isDryRun($tool, $arguments),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $entry
+     */
+    private function append(array $entry): void
+    {
+        $journal = $this->all();
+        $journal[] = $entry;
+
+        if (count($journal) > self::LIMIT) {
+            $journal = array_slice($journal, -self::LIMIT);
+        }
+
+        update_option(self::OPTION, $journal, false);
     }
 
     /**

@@ -54,7 +54,9 @@ final class SetGlobalParameters implements ToolInterface, AnnotatedToolInterface
     {
         Args::rejectUnknown($arguments, ['json', 'data', 'dry_run'], 'arguments');
 
-        $arguments = JsonArgs::decode($arguments, ['json', 'data']);
+        // json is left as the string it may arrive as, so its exact shape is
+        // what gets stored; GlobalParameters::prepare() checks it decodes.
+        $arguments = JsonArgs::decode($arguments, ['data']);
         $dryRun = Args::bool($arguments, 'dry_run', false);
 
         $hasJson = array_key_exists('json', $arguments) && $arguments['json'] !== null;

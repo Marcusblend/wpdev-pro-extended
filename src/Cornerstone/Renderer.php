@@ -22,6 +22,15 @@ namespace ProExtended\Cornerstone;
 final class Renderer
 {
     /**
+     * The globals a render against a post changes: the main query and the ones
+     * setup_postdata() writes. All of them are put back afterwards.
+     */
+    public const QUERY_GLOBALS = [
+        'wp_query', 'wp_the_query', 'post',
+        'id', 'authordata', 'currentday', 'currentmonth', 'page', 'pages', 'multipage', 'more', 'numpages',
+    ];
+
+    /**
      * Render elements as the front end would.
      *
      * @param  array<int, mixed> $elements
@@ -34,8 +43,7 @@ final class Renderer
         }
 
         $warnings = [];
-        $previousPost = $GLOBALS['post'] ?? null;
-        $setUp = false;
+        $post = null;
 
         if ($contextPostId !== null) {
             $post = get_post($contextPostId);
@@ -43,13 +51,15 @@ final class Renderer
             if (! $post instanceof \WP_Post) {
                 throw new \InvalidArgumentException(sprintf('Post %d does not exist, so it cannot be the context.', $contextPostId));
             }
-
-            $GLOBALS['post'] = $post;
-            setup_postdata($post);
-            $setUp = true;
         }
 
+        $saved = self::captureGlobals();
+
         try {
+            if ($post !== null) {
+                $this->enterPost($post);
+            }
+
             $service = cornerstone('Elements');
             $prepared = $this->prepare($service, $elements, $warnings);
 
@@ -72,11 +82,7 @@ final class Renderer
         } catch (\Throwable $e) {
             throw new \RuntimeException('The elements could not be rendered: ' . $e->getMessage(), 0, $e);
         } finally {
-            if ($setUp) {
-                wp_reset_postdata();
-            }
-
-            $GLOBALS['post'] = $previousPost;
+            self::restoreGlobals($saved);
         }
 
         return [
@@ -86,6 +92,84 @@ final class Renderer
             'context_post_id' => $contextPostId,
             'warnings'        => $warnings,
         ];
+    }
+
+    /**
+     * Make a post the main query, as its own page would.
+     *
+     * Setting only $post was enough for a token, but not for anything that
+     * asks the query: is_singular() and the archive conditions read
+     * $wp_query, and the current-query looper walks it (and resets to
+     * $wp_the_query when it ends), so both become a singular query for the
+     * post. The query is built for the post's own type, and if a filter (a
+     * language switcher, say) narrows it away from the post, the post is put
+     * back into it: the render is against this post either way.
+     */
+    private function enterPost(\WP_Post $post): void
+    {
+        $vars = match ($post->post_type) {
+            'page'       => ['page_id' => $post->ID],
+            'attachment' => ['attachment_id' => $post->ID],
+            default      => ['p' => $post->ID, 'post_type' => $post->post_type],
+        };
+
+        // The caller's right to read it was checked already; its status must
+        // not hide it from the query.
+        $vars['post_status'] = $post->post_status;
+
+        $query = new \WP_Query($vars);
+
+        if ($query->post_count < 1 || ! $query->post instanceof \WP_Post || (int) $query->post->ID !== (int) $post->ID) {
+            $query->posts = [$post];
+            $query->post = $post;
+            $query->post_count = 1;
+            $query->found_posts = 1;
+            $query->max_num_pages = 1;
+        }
+
+        $query->queried_object = $post;
+        $query->queried_object_id = (int) $post->ID;
+
+        $GLOBALS['wp_query'] = $query;
+        $GLOBALS['wp_the_query'] = $query;
+        $GLOBALS['post'] = $post;
+        setup_postdata($post);
+    }
+
+    /**
+     * The query globals as they stand, including which were never set.
+     *
+     * @return array{set: array<string, mixed>, unset: string[]}
+     */
+    public static function captureGlobals(): array
+    {
+        $saved = ['set' => [], 'unset' => []];
+
+        foreach (self::QUERY_GLOBALS as $name) {
+            if (array_key_exists($name, $GLOBALS)) {
+                $saved['set'][$name] = $GLOBALS[$name];
+            } else {
+                $saved['unset'][] = $name;
+            }
+        }
+
+        return $saved;
+    }
+
+    /**
+     * Put the query globals back exactly as captureGlobals() found them.
+     *
+     * @param array{set: array<string, mixed>, unset: string[]} $saved
+     */
+    public static function restoreGlobals(array $saved): void
+    {
+        foreach ($saved['set'] as $name => $value) {
+            $GLOBALS[$name] = $value;
+        }
+
+        foreach ($saved['unset'] as $name) {
+            unset($GLOBALS[$name]);
+        }
     }
 
     /**

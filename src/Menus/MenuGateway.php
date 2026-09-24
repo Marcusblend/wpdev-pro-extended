@@ -272,7 +272,7 @@ final class MenuGateway
                 $positioned[$newId] = (int) $operation['position'];
             }
 
-            $written = ['id' => $newId];
+            $written = ['id' => $newId, 'parent' => (int) $args['menu-item-parent-id']];
 
             foreach (MenuItems::FIELDS as $name => $key) {
                 if (array_key_exists($key, $args)) {
@@ -422,10 +422,18 @@ final class MenuGateway
             $args['menu-item-position'] = (int) $existing[$itemId]['order'];
         }
 
+        // wp_update_nav_menu_item() reads a missing menu-item-parent-id as 0,
+        // so an update that names no parent would move a child item to the
+        // top level. Always send one: the parent the operation names, or the
+        // one the item already has.
+        $named = null;
+
         if (array_key_exists('parent', $operation) && $operation['parent'] !== null) {
             $parent = $operation['parent'];
-            $args['menu-item-parent-id'] = ($parent['kind'] ?? '') === 'root' ? 0 : $this->resolve($parent, $refs);
+            $named = ($parent['kind'] ?? '') === 'root' ? 0 : $this->resolve($parent, $refs);
         }
+
+        $args['menu-item-parent-id'] = MenuItems::parentId($named, $itemId, $existing);
 
         // menu-item-position is deliberately not passed through:
         // wp_update_nav_menu_item() would write menu_order for this item and

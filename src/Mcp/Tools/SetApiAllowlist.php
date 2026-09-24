@@ -20,7 +20,7 @@ final class SetApiAllowlist implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Add or remove entries on Cornerstone\'s External API allowlist — the endpoints an External API looper may call. Cornerstone matches a request against it by prefix, so each entry is normalised to https, a lowercase host and a trailing slash: without the slash an entry also matches a longer host that merely starts the same way. Plain http and entries carrying a query or fragment are refused. This never turns the External API feature on or off — that is a decision about what the site may reach out to, and get_site_info reports whether it is on. The allowlist is backed up first, and dry_run reports the result without writing.';
+        return 'Add or remove entries on Cornerstone\'s External API allowlist — the endpoints an External API looper may call. Cornerstone matches a request against it by prefix, so each entry is normalised to https, a lowercase host and a trailing slash: without the slash an entry also matches a longer host that merely starts the same way. Plain http, entries carrying a query, a fragment or a user name, and hosts inside the site\'s own network (localhost, loopback, private and link-local addresses) are refused. While the feature is on, a change that would leave the list empty is refused too, because Cornerstone reads an empty allowlist as "allow every URL". This never turns the External API feature on or off — that is a decision about what the site may reach out to, and get_site_info reports whether it is on. The allowlist is backed up first, and dry_run reports the result without writing.';
     }
 
     public function inputSchema(): array
@@ -61,7 +61,8 @@ final class SetApiAllowlist implements ToolInterface, AnnotatedToolInterface
         $stored = get_option(ApiAllowlist::OPTION, '');
         $stored = is_string($stored) ? $stored : '';
 
-        $plan = ApiAllowlist::plan($stored, $add, $remove);
+        $featureOn = Features::externalApiEnabled();
+        $plan = ApiAllowlist::plan($stored, $add, $remove, $featureOn);
 
         if ($plan['errors'] !== []) {
             throw new \InvalidArgumentException("These entries could not be used:\n- " . implode("\n- ", $plan['errors']));
@@ -69,7 +70,7 @@ final class SetApiAllowlist implements ToolInterface, AnnotatedToolInterface
 
         $result = [
             'dry_run'        => $dryRun,
-            'feature_on'     => Features::externalApiEnabled(),
+            'feature_on'     => $featureOn,
             'added'          => $plan['added'],
             'removed'        => $plan['removed'],
             'already_listed' => $plan['unchanged'],

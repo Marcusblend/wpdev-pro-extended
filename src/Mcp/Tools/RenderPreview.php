@@ -6,6 +6,7 @@ namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Cornerstone\Renderer;
 use ProExtended\Layouts\LayoutService;
+use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 
@@ -13,6 +14,9 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
 {
     /** Keep a result passable through one tool response. */
     private const MAX_BYTES = 400000;
+
+    /** Elements that show something without any text of their own. */
+    private const MEDIA_TAGS = ['img', 'svg', 'video', 'iframe', 'picture'];
 
     public function __construct(
         private readonly Renderer $renderer,
@@ -26,7 +30,7 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Render elements to HTML without saving anything, so what they actually produce can be checked before or instead of a save. Pass elements, or post_id with an optional path to render part of a stored layout ("0._modules.1"). for_post sets the post the render happens against, which is what loopers, conditions and tokens read — a looper with no results, a condition that hides everything and a token that resolves to nothing all save without complaint and are only visible here. Tokens are expanded unless expand_tokens is false. Strictly read-only.';
+        return 'Render elements to HTML without saving anything, so what they actually produce can be checked before or instead of a save. Pass elements, or post_id with an optional path to render part of a stored layout ("0._modules.1"). for_post sets the post the render happens against: it becomes the main query, so is_singular(), archive conditions, current-query loopers and tokens read it as they would on its own page — a looper with no results, a condition that hides everything and a token that resolves to nothing all save without complaint and are only visible here. Tokens are expanded unless expand_tokens is false. You need to be able to read post_id and for_post. It writes nothing to the database, but rendering runs what the elements contain — shortcodes, Twig and External API loopers — as the front end would.';
     }
 
     public function inputSchema(): array
@@ -83,6 +87,23 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException('Pass elements, or post_id to render a stored layout.');
         }
 
+        // Rendering a post's layout, or rendering against a post, shows what
+        // it holds: a private or draft post is no more readable here than on
+        // the front end.
+        foreach (['post_id' => $postId, 'for_post' => $forPost] as $argument => $id) {
+            if ($id === null) {
+                continue;
+            }
+
+            if (! get_post($id) instanceof \WP_Post) {
+                throw new \InvalidArgumentException(sprintf('%s: post %d does not exist.', $argument, $id));
+            }
+
+            if (! current_user_can('read_post', $id)) {
+                throw new ToolPermissionException(sprintf('%s: you cannot read post %d, so it cannot be rendered or rendered against.', $argument, $id));
+            }
+        }
+
         $source = 'elements';
 
         if ($postId !== null) {
@@ -110,7 +131,7 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
             'expanded'        => $rendered['expanded'],
             'bytes'           => $rendered['bytes'],
             'truncated'       => $truncated,
-            'empty'           => trim(strip_tags($rendered['html'])) === '',
+            'empty'           => self::isEmpty($rendered['html']),
             'html'            => $html,
         ];
 
@@ -119,10 +140,23 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
         }
 
         if ($result['empty']) {
-            $result['note'] = 'The elements rendered no visible text. A looper with no results, a condition that hides its element, or a token that resolves to nothing all look like this.';
+            $result['note'] = 'The elements rendered no visible text or media. A looper with no results, a condition that hides its element, or a token that resolves to nothing all look like this.';
         }
 
         return $result;
+    }
+
+    /**
+     * Whether rendered HTML shows nothing: no text, and no image, SVG, video,
+     * iframe or picture, which show something without any text of their own.
+     */
+    public static function isEmpty(string $html): bool
+    {
+        if (trim(strip_tags($html)) !== '') {
+            return false;
+        }
+
+        return preg_match('/<(' . implode('|', self::MEDIA_TAGS) . ')[\s>\/]/i', $html) !== 1;
     }
 
     /**
@@ -209,7 +243,10 @@ final class RenderPreview implements ToolInterface, AnnotatedToolInterface
 
     public function annotations(): array
     {
-        return Annotations::read('Render Preview');
+        // Read-only: nothing is written to the database. Open-world: rendering
+        // runs shortcodes, Twig and External API loopers, which can reach
+        // beyond the site.
+        return Annotations::read('Render Preview', true);
     }
 
     public function requiredCapability(): string

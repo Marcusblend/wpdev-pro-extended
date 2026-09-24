@@ -20,8 +20,8 @@ final class ThemeOptionsWriter
     /**
      * Keys this tool refuses, and why.
      *
-     * Global CSS and JS belong to set_global_css, which backs them up and
-     * checks them. The palette and font lists belong to set_colors and
+     * Global CSS belongs to set_global_css and Global JS to set_global_js,
+     * which back them up and check them. The palette and font lists belong to set_colors and
      * set_fonts, which keep their references intact. The breakpoint keys and
      * the stack decide how every piece of stored element data is read, so
      * changing them here would silently reinterpret the whole site. Variables
@@ -30,9 +30,9 @@ final class ThemeOptionsWriter
      */
     public const REFUSED = [
         'x_custom_styles'     => 'Global CSS is written with set_global_css, which backs it up and reports its size.',
-        'x_custom_scripts'    => 'Global JS is written with set_global_css.',
+        'x_custom_scripts'    => 'Global JS is written with set_global_js.',
         'cs_v1_custom_css'    => 'Legacy Global CSS is written with set_global_css.',
-        'cs_v1_custom_js'     => 'Legacy Global JS is written with set_global_css.',
+        'cs_v1_custom_js'     => 'Legacy Global JS is written with set_global_js.',
         'cornerstone_color_items' => 'The palette is written with set_colors, which keeps references to each colour intact.',
         'cornerstone_font_config' => 'Font settings are written with set_fonts.',
         'cornerstone_font_items'  => 'Fonts are written with set_fonts, which derives names, stacks and weights the way Cornerstone does.',

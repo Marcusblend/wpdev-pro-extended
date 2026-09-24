@@ -18,7 +18,7 @@ final class ListPrefabs implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'List Cornerstone\'s prefab elements: the ready-made element groups the builder\'s library inserts, such as a horizontal flex container or a link box. Pass group and name to get one prefab\'s element values, which can be inserted with update_layout\'s add operation — a better starting point than an element with defaults, because it arrives configured the way Cornerstone configures it. Prefabs are registered in code, so this reads the live registry.';
+        return 'List Cornerstone\'s prefab elements: the ready-made element groups the builder\'s library inserts, such as a horizontal flex container or a link box. Pass group and name to get one prefab\'s element values, which can be inserted with update_layout\'s add operation — a better starting point than an element with defaults, because it arrives configured the way Cornerstone configures it. Prefabs are registered in code, so this reads the live registry, and it caches what it reads: update_layout\'s prefab operation inserts a prefab by group and name from that cache, since a write cannot read the registry itself.';
     }
 
     public function inputSchema(): array

@@ -275,6 +275,7 @@ final class LayoutService
         $backup = $backups[$backupId];
         $rawData = $backup['data'];
         $source  = $backup['source'];
+        $settingsError = null;
 
         if ($source === 'post_meta') {
             // Write directly via $wpdb to preserve exact encoding. $wpdb->update()
@@ -317,33 +318,12 @@ final class LayoutService
                 ));
             }
 
-            // Older backups predate the settings snapshot; they carry no
-            // 'had_settings' key and are restored exactly as before.
-            if (($backup['had_settings'] ?? false) === true && is_string($backup['settings'] ?? null)) {
-                $settingsExist = (int) $wpdb->get_var($wpdb->prepare(
-                    "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_cornerstone_settings'",
-                    $postId
-                ));
-
-                if ($settingsExist > 0) {
-                    $wpdb->update(
-                        $wpdb->postmeta,
-                        ['meta_value' => $backup['settings']],
-                        ['post_id' => $postId, 'meta_key' => '_cornerstone_settings'],
-                        ['%s'],
-                        ['%d', '%s']
-                    );
-                } else {
-                    $wpdb->insert(
-                        $wpdb->postmeta,
-                        [
-                            'post_id'    => $postId,
-                            'meta_key'   => '_cornerstone_settings',
-                            'meta_value' => $backup['settings'],
-                        ],
-                        ['%d', '%s', '%s']
-                    );
-                }
+            // A settings write the database refuses is reported, but only after
+            // the caches below are cleared: the elements are back either way.
+            try {
+                self::restoreSettingsRow($wpdb, $postId, $backup);
+            } catch (\RuntimeException $e) {
+                $settingsError = $e;
             }
 
             // $wpdb bypasses the object cache, so the old value would keep being
@@ -397,7 +377,84 @@ final class LayoutService
             $this->lastWrite = ['path' => $this->gateway->firePageSaved($postId)['path'], 'warnings' => []];
         }
 
+        if ($settingsError !== null) {
+            throw $settingsError;
+        }
+
         return true;
+    }
+
+    /**
+     * Put a page's _cornerstone_settings row back the way the backup found it.
+     *
+     * A backup records whether the row existed. If it did, its value is
+     * written back; if it did not, whatever is there now was written after
+     * the backup (a header override update_document_settings added, say), so
+     * restoring means deleting it. A backup made before the settings were
+     * captured carries no had_settings key and leaves the row alone, exactly
+     * as such backups always restored.
+     *
+     * @param  object               $wpdb   The WordPress database object.
+     * @param  array<string, mixed> $backup
+     * @return string|null What was done: "updated", "inserted" or "deleted"; null when the row was left alone.
+     *
+     * @throws \RuntimeException When the database refuses the write.
+     */
+    public static function restoreSettingsRow(object $wpdb, int $postId, array $backup): ?string
+    {
+        if (! array_key_exists('had_settings', $backup)) {
+            return null;
+        }
+
+        if ($backup['had_settings'] === false) {
+            $written = $wpdb->delete(
+                $wpdb->postmeta,
+                ['post_id' => $postId, 'meta_key' => '_cornerstone_settings'],
+                ['%d', '%s']
+            );
+            $action = 'deleted';
+        } elseif ($backup['had_settings'] === true && is_string($backup['settings'] ?? null)) {
+            $exists = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT COUNT(*) FROM {$wpdb->postmeta} WHERE post_id = %d AND meta_key = '_cornerstone_settings'",
+                $postId
+            ));
+
+            if ($exists > 0) {
+                $written = $wpdb->update(
+                    $wpdb->postmeta,
+                    ['meta_value' => $backup['settings']],
+                    ['post_id' => $postId, 'meta_key' => '_cornerstone_settings'],
+                    ['%s'],
+                    ['%d', '%s']
+                );
+                $action = 'updated';
+            } else {
+                $written = $wpdb->insert(
+                    $wpdb->postmeta,
+                    [
+                        'post_id'    => $postId,
+                        'meta_key'   => '_cornerstone_settings',
+                        'meta_value' => $backup['settings'],
+                    ],
+                    ['%d', '%s', '%s']
+                );
+                $action = 'inserted';
+            }
+        } else {
+            return null;
+        }
+
+        // Only false means the query failed; 0 rows is a value already in
+        // place, or a row already gone.
+        if ($written === false) {
+            throw new \RuntimeException(sprintf(
+                'Restored the layout of post %d but not its settings (_cornerstone_settings): %s',
+                $postId,
+                is_string($wpdb->last_error ?? null) && $wpdb->last_error !== '' ? $wpdb->last_error : 'unknown database error'
+            ));
+        }
+
+        return $action;
     }
 
     /**
