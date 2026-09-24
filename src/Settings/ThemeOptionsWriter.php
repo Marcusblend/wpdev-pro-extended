@@ -42,6 +42,7 @@ final class ThemeOptionsWriter
         'cs_theme_variables'  => 'Global variables are written with set_variables, which validates each name and backs the list up.',
         'cs_global_parameter_json' => 'Global parameters are written with set_global_parameters, which checks the schema against the values.',
         'cs_global_parameter_data' => 'Global parameter values are written with set_global_parameters, which checks them against the schema.',
+        'cs_twig_extension_advanced' => 'The Advanced Twig extension lets any Twig string call any PHP function and fire WordPress actions, which is arbitrary PHP on the site; switch it in the Theme Options panel if it is ever truly needed.',
     ];
 
     /** Suffixes that carry responsive data for a registered key. */
@@ -84,6 +85,13 @@ final class ThemeOptionsWriter
                 continue;
             }
 
+            $problems = self::valueErrors($key, $value);
+
+            if ($problems !== []) {
+                array_push($errors, ...$problems);
+                continue;
+            }
+
             $was = $current[$key] ?? null;
 
             if (self::same($was, $value)) {
@@ -113,6 +121,20 @@ final class ThemeOptionsWriter
         $position = strpos($key, self::RESPONSIVE_PREFIX);
 
         return $position === false || $position === 0 ? $key : substr($key, 0, $position);
+    }
+
+    /**
+     * Keys whose stored shape Cornerstone reads without checking, so a bad
+     * value breaks rendering: they are validated before they are written.
+     *
+     * @return string[]
+     */
+    public static function valueErrors(string $key, mixed $value): array
+    {
+        return match ($key) {
+            TwigTemplates::OPTION => TwigTemplates::errors($value),
+            default               => [],
+        };
     }
 
     private static function isStorable(mixed $value): bool

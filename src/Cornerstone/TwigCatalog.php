@@ -244,7 +244,17 @@ final class TwigCatalog
     {
         [$environment] = self::environment();
 
-        if ($environment === null || ! method_exists($environment, 'tokenize') || ! method_exists($environment, 'parse') || ! class_exists('Twig\\Source')) {
+        return $environment === null ? null : self::parserFor($environment);
+    }
+
+    /**
+     * A parse-only checker bound to one Twig Environment.
+     *
+     * @return (\Closure(string): ?string)|null Null when the object cannot tokenize and parse.
+     */
+    public static function parserFor(object $environment): ?\Closure
+    {
+        if (! method_exists($environment, 'tokenize') || ! method_exists($environment, 'parse') || ! class_exists('Twig\\Source')) {
             return null;
         }
 
@@ -254,6 +264,13 @@ final class TwigCatalog
 
                 return null;
             } catch (\Throwable $e) {
+                // Only Twig's own errors say something about the string; any
+                // other failure (an extension that would not initialise) is
+                // the environment's problem, and the lint stays quiet.
+                if (! is_a($e, 'Twig\\Error\\Error')) {
+                    return null;
+                }
+
                 $message = method_exists($e, 'getRawMessage') ? (string) $e->getRawMessage() : $e->getMessage();
                 $line = method_exists($e, 'getTemplateLine') ? (int) $e->getTemplateLine() : 0;
 

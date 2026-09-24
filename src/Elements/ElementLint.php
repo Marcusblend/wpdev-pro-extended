@@ -51,6 +51,15 @@ final class ElementLint
         'literal-font-family'       => 'A font family setting holds a literal stack rather than a global font reference, so it stops following the site\'s fonts.',
     ];
 
+    /**
+     * Twig warning codes (1.5). Kept apart from CODES so the Twig checks stay
+     * self-contained; codes() lists both.
+     */
+    public const TWIG_CODES = [
+        'twig-syntax' => 'A string holds Twig that does not parse with the site\'s Twig environment; on the live site Cornerstone prints the raw template instead.',
+        'twig-off'    => 'A string holds Twig syntax but Twig is off on this site (cs_twig_enabled), so it prints literally.',
+    ];
+
     /** What a missing _m changes, by type. */
     private const LEGACY_EFFECTS = [
         'bar'           => 'height 6em and a 16px base font instead of 100px and 1em',
@@ -123,6 +132,16 @@ final class ElementLint
     public function __construct(
         private readonly LintContext $context,
     ) {}
+
+    /**
+     * Every warning code, the Twig ones included.
+     *
+     * @return array<string, string>
+     */
+    public static function codes(): array
+    {
+        return self::CODES + self::TWIG_CODES;
+    }
 
     /**
      * Lint a list of elements and their children.
@@ -266,6 +285,52 @@ final class ElementLint
         $this->checkLayers($element, $type, $add);
         $this->checkCss($element, $type, $add);
         $this->checkLiteralValues($element, $type, $add);
+        $this->checkTwig($element, $add);
+    }
+
+    // ─── Twig (1.5) ──────────────────────────────────────────────────────────
+
+    /**
+     * Twig in element strings: present while Twig is off (twig-off), or not
+     * parsing with the site's environment (twig-syntax).
+     *
+     * Dynamic Content tokens expand before Twig runs, so they are set aside
+     * first (TwigSyntax). Strings are parsed, never rendered. Without a
+     * parser (no environment, or unit tests) twig-syntax is skipped; with
+     * Twig's state unknown, twig-off is.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function checkTwig(array $element, \Closure $add): void
+    {
+        if ($this->context->twigEnabled === null && $this->context->twigParser === null) {
+            return;
+        }
+
+        foreach ($this->strings($element) as $key => $value) {
+            if (! \ProExtended\Cornerstone\TwigSyntax::containsTwig($value)) {
+                continue;
+            }
+
+            if ($this->context->twigEnabled === false) {
+                $add('twig-off', sprintf(
+                    '%s holds Twig ("%s") but Twig is off on this site, so it prints literally. Switch it on with update_theme_options {"cs_twig_enabled": true}, or use Dynamic Content.',
+                    $key,
+                    \ProExtended\Cornerstone\TwigSyntax::excerpt($value)
+                ));
+                continue;
+            }
+
+            if ($this->context->twigParser === null) {
+                continue;
+            }
+
+            $error = ($this->context->twigParser)(\ProExtended\Cornerstone\TwigSyntax::withoutTokens($value));
+
+            if (is_string($error) && $error !== '') {
+                $add('twig-syntax', sprintf('%s: Twig does not parse: %s', $key, $error));
+            }
+        }
     }
 
     private function checkType(string $type, \Closure $add): void
