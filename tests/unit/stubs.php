@@ -54,6 +54,10 @@ final class WpStub
     }
 }
 
+if (! defined('PE_VERSION')) {
+    define('PE_VERSION', '0.0.0-test');
+}
+
 foreach (['MINUTE_IN_SECONDS' => 60, 'HOUR_IN_SECONDS' => 3600, 'DAY_IN_SECONDS' => 86400, 'WEEK_IN_SECONDS' => 604800] as $name => $seconds) {
     if (! defined($name)) {
         define($name, $seconds);
@@ -249,5 +253,12 @@ if (! function_exists('wp_update_post')) {
     function wp_update_post(array $post): int
     {
         return (int) ($post['ID'] ?? 0);
+    }
+}
+
+if (! function_exists('post_type_exists')) {
+    function post_type_exists(string $postType): bool
+    {
+        return in_array($postType, ['post', 'page', 'attachment', 'nav_menu_item', 'cs_global_block', 'cs_header', 'cs_footer', 'cs_layout_single', 'cs_layout_archive', 'cs_template'], true);
     }
 }

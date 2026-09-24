@@ -17,6 +17,9 @@ use ProExtended\Support\SkipValidation;
 
 final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 {
+    /** Every operation patch() handles, and so every one the schema offers. */
+    public const OPS = ['add', 'remove', 'update', 'preset', 'move', 'duplicate', 'wrap', 'unwrap', 'prefab'];
+
     public function __construct(
         private readonly LayoutService $layouts,
         private readonly HierarchyValidator $validator,
@@ -53,7 +56,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                         'properties' => [
                             'op' => [
                                 'type' => 'string',
-                                'enum' => ['add', 'remove', 'update', 'preset'],
+                                'enum' => self::OPS,
                                 'description' => 'Operation type.',
                             ],
                             'path' => [
@@ -61,10 +64,22 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
                                 'description' => 'JSON pointer path to the target element (e.g. "0._modules.0._modules.1").',
                             ],
                             'value' => [
-                                'description' => 'For "add": the element to insert. For "update": object with properties to merge.',
+                                'description' => 'For "add": the element to insert. For "update": object with properties to merge. For "wrap": the element to wrap with, including its _type.',
                             ],
                             'preset' => [
                                 'description' => 'For "preset": the preset to apply, as its template ID or its title.',
+                            ],
+                            'to' => [
+                                'type'        => 'string',
+                                'description' => 'For "move": the path the element lands at, read in the tree as it stands before the move (e.g. "0._modules.2").',
+                            ],
+                            'group' => [
+                                'type'        => 'string',
+                                'description' => 'For "prefab": the prefab\'s group, from list_prefabs.',
+                            ],
+                            'name' => [
+                                'type'        => 'string',
+                                'description' => 'For "prefab": the prefab\'s name, from list_prefabs.',
                             ],
                         ],
                     ],
@@ -117,7 +132,6 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
         $total    = count($operations);
         $original = $data;
-        $errors   = [];
         $warnings = [];
         $post     = get_post($postId);
         $flat     = $post instanceof \WP_Post && $post->post_type === 'cs_global_block';
@@ -126,37 +140,9 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         // Apply every operation to an in-memory copy first. Nothing is written
         // unless all of them succeed, so a failed patch can never leave a
         // half-applied element tree on the post.
-        foreach ($operations as $index => $op) {
-            if (! is_array($op)) {
-                $errors[] = sprintf('Operation %s is not an object.', (string) $index);
-                continue;
-            }
-
-            $opType = $op['op'] ?? '';
-            $path   = $op['path'] ?? '';
-            $value  = $op['value'] ?? null;
-
-            if ($opType === 'add' && $stamper !== null && is_array($value)) {
-                $value = $this->stampInserted($stamper, $value, $flat);
-            }
-
-            try {
-                match ($opType) {
-                    'update' => $this->applyUpdate($data, $path, $value),
-                    'add'    => $this->applyAdd($data, $path, $value),
-                    'remove' => $this->applyRemove($data, $path),
-                    'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
-                    'move'      => $this->applyMove($data, $path, (string) ($op['to'] ?? '')),
-                    'duplicate' => $this->applyDuplicate($data, $path),
-                    'wrap'      => $this->applyWrap($data, $path, $value),
-                    'unwrap'    => $this->applyUnwrap($data, $path),
-                    'prefab'    => $this->applyPrefab($data, $path, (string) ($op['group'] ?? ''), (string) ($op['name'] ?? '')),
-                    default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', $opType)),
-                };
-            } catch (\Throwable $e) {
-                $errors[] = sprintf('Operation %s (%s): %s', (string) $index, (string) $opType, $e->getMessage());
-            }
-        }
+        $patched = $this->patch($data, $operations, $flat, $stamper);
+        $data    = $patched['data'];
+        $errors  = $patched['errors'];
 
         if (! empty($errors)) {
             return $this->result($postId, false, 0, $total, null, $warnings, $errors, null);
@@ -225,6 +211,56 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
         $result['stamped'] = $stamper?->counts();
 
         return $result;
+    }
+
+    /**
+     * Apply operations to layout data in memory, in order.
+     *
+     * Nothing is read from or written to the site here: execute() loads the
+     * layout, runs this, and saves only when it reports no errors. Public so
+     * the operations can be tested without a site.
+     *
+     * @param  array<mixed>             $data
+     * @param  array<int|string, mixed> $operations
+     * @return array{data: array<mixed>, errors: string[]}
+     */
+    public function patch(array $data, array $operations, bool $flat = false, ?ElementStamper $stamper = null): array
+    {
+        $errors = [];
+
+        foreach ($operations as $index => $op) {
+            if (! is_array($op)) {
+                $errors[] = sprintf('Operation %s is not an object.', (string) $index);
+                continue;
+            }
+
+            $opType = $op['op'] ?? '';
+            $path   = $op['path'] ?? '';
+            $value  = $op['value'] ?? null;
+
+            if ($opType === 'add' && $stamper !== null && is_array($value)) {
+                $value = $this->stampInserted($stamper, $value, $flat);
+            }
+
+            try {
+                match ($opType) {
+                    'update' => $this->applyUpdate($data, $path, $value),
+                    'add'    => $this->applyAdd($data, $path, $value),
+                    'remove' => $this->applyRemove($data, $path),
+                    'preset' => $this->applyPreset($data, $path, $op['preset'] ?? $value),
+                    'move'      => $this->applyMove($data, $path, (string) ($op['to'] ?? '')),
+                    'duplicate' => $this->applyDuplicate($data, $path),
+                    'wrap'      => $this->applyWrap($data, $path, $value),
+                    'unwrap'    => $this->applyUnwrap($data, $path),
+                    'prefab'    => $this->applyPrefab($data, $path, (string) ($op['group'] ?? ''), (string) ($op['name'] ?? '')),
+                    default  => throw new \InvalidArgumentException(sprintf('Unknown operation "%s".', is_scalar($opType) ? (string) $opType : gettype($opType))),
+                };
+            } catch (\Throwable $e) {
+                $errors[] = sprintf('Operation %s (%s): %s', (string) $index, is_scalar($opType) ? (string) $opType : gettype($opType), $e->getMessage());
+            }
+        }
+
+        return ['data' => $data, 'errors' => $errors];
     }
 
     /**
