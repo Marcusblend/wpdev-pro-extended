@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\ElementContext;
 use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutService;
@@ -26,7 +27,7 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Deploy (write) Cornerstone layout data to a post. Automatically creates a backup before writing and validates the data. Use with caution — this overwrites the existing layout. For headers, footers, layouts and component documents this is a full replace of the shape get_layout returns: settings left out return to their defaults (title, slug and a single/archive layout\'s type are kept).';
+        return 'Deploy (write) Cornerstone layout data to a post. Automatically creates a backup before writing and validates the data. Use with caution — this overwrites the existing layout. For headers, footers, layouts and component documents this is a full replace of the shape get_layout returns: settings left out return to their defaults (title, slug and a single/archive layout\'s type are kept). A region the document type does not render is an error (create_document lists each type\'s regions).';
     }
 
     public function inputSchema(): array
@@ -81,6 +82,17 @@ final class DeployLayout implements ToolInterface, AnnotatedToolInterface
         $post = get_post($postId);
         if (! $post) {
             throw new \InvalidArgumentException(sprintf('Post %d does not exist.', $postId));
+        }
+
+        // A header, footer or layout renders only its own regions; anything
+        // else in "regions" would be stored and never shown. That is not
+        // something skip_validation should wave through, so it is checked
+        // before validation and before the backup.
+        $gateway = $this->layouts->gateway();
+        $docType = (string) $gateway->docTypeForPost($post);
+
+        if (str_starts_with($docType, 'layout:') && is_array($layoutData) && is_array($layoutData['regions'] ?? null)) {
+            DocumentGateway::assertRegionsRendered($docType, $layoutData['regions'], $gateway->renderedRegions($docType));
         }
 
         // Determine context for validation.

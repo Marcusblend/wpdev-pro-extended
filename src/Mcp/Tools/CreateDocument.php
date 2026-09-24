@@ -12,13 +12,12 @@ use ProExtended\Elements\HierarchyValidator;
 use ProExtended\Layouts\LayoutOutline;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Mcp\ToolPermissionException;
-use ProExtended\Recipes\HeaderRecipes;
 use ProExtended\Support\Args;
 use ProExtended\Support\JsonArgs;
 
 final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 {
-    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'preset', 'preset_options', 'if_not_exists', 'dry_run', 'stamp_new'];
+    private const ARGUMENTS = ['type', 'title', 'slug', 'settings', 'layout_data', 'if_not_exists', 'dry_run', 'stamp_new'];
 
     private readonly DocumentGateway $gateway;
 
@@ -37,7 +36,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Create a Cornerstone header, footer, component document, or single/archive layout. Optional settings (assignments, assignment_priority, multi_region, header_enabled, footer_enabled, library_group, document_visibility, customCSS, customJS) and layout_data in the shape get_layout returns ({"settings", "regions"} for layouts, {"elements", "settings"} for components). With if_not_exists (default true) an existing document of the same type and title is returned instead. Use dry_run: true to preview.';
+        return 'Create a Cornerstone header, footer, component document, or single/archive layout. Optional settings (assignments, assignment_priority, multi_region, header_enabled, footer_enabled, library_group, document_visibility, customCSS, customJS) and layout_data in the shape get_layout returns ({"settings", "regions"} for layouts, {"elements", "settings"} for components). Each type renders only its own regions (' . $this->regionSummary() . '); a region the type does not render is an error, because its elements would be saved and never shown. There are no built-in header presets: save a finished header as a document template with create_template and pass get_template\'s content as layout_data, or start from a list_prefabs prefab. With if_not_exists (default true) an existing document of the same type and title is returned instead. Use dry_run: true to preview.';
     }
 
     public function inputSchema(): array
@@ -65,16 +64,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                 ],
                 'layout_data' => [
                     'type'        => ['object', 'array'],
-                    'description' => 'Optional. The document data, in the shape get_layout returns in "data".',
-                ],
-                'preset' => [
-                    'type'        => 'string',
-                    'enum'        => HeaderRecipes::NAMES,
-                    'description' => 'Optional. Build layout_data from a recipe instead of passing it: "header.simple" (bar, container, logo, inline and collapsed navigation), "header.mega" (the same plus a mega menu panel) or "mega_menu_panel" (the dropdown subtree on its own, to insert with update_layout).',
-                ],
-                'preset_options' => [
-                    'type'        => 'object',
-                    'description' => 'Optional. Recipe options: menu (term ID, "menu:<id>" or "location:<slug>"), logo (attachment reference), logo_alt, collapsed (default true), trigger (mega menu label) and columns ([{heading, links: [{label, href}]}]).',
+                    'description' => 'Optional. The document data, in the shape get_layout returns in "data". The keys of "regions" must be regions the type renders: ' . $this->regionSummary() . '. A component takes {"elements": {"e0": {"_type": "root", ...}, ...}} instead.',
                 ],
                 'if_not_exists' => [
                     'type'        => 'boolean',
@@ -94,7 +84,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 
     public function execute(array $arguments): mixed
     {
-        $arguments = JsonArgs::decode($arguments, ['settings', 'layout_data', 'preset_options']);
+        $arguments = JsonArgs::decode($arguments, ['settings', 'layout_data']);
         Args::rejectUnknown($arguments, self::ARGUMENTS, 'arguments');
 
         $type = Args::enum($arguments, 'type', $this->gateway->availableTypes(), null);
@@ -128,25 +118,6 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
 
         $settings = DocumentSettings::validate($docType, Args::object($arguments, 'settings') ?? []);
         $layoutData = Args::object($arguments, 'layout_data');
-        $preset = Args::string($arguments, 'preset', null, 64, false);
-
-        if ($preset !== null) {
-            if ($layoutData !== null) {
-                throw new \InvalidArgumentException('Pass preset or layout_data, not both.');
-            }
-
-            $built = HeaderRecipes::build($preset, Args::object($arguments, 'preset_options') ?? []);
-
-            foreach ($built['warnings'] as $warning) {
-                $warnings[] = $warning;
-            }
-
-            $layoutData = $built['data'];
-
-            if (! isset($layoutData['regions'])) {
-                throw new \InvalidArgumentException(sprintf('The "%s" preset builds a subtree, not a document. Create the header first, then insert it with update_layout.', $preset));
-            }
-        }
 
         [$elements, $dataSettings] = $this->readLayoutData($docType, $layoutData, $warnings);
         $settings = array_merge($dataSettings, $settings);
@@ -297,15 +268,7 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
                 throw new \InvalidArgumentException('layout_data for a header, footer or layout must be {"settings": {...}, "regions": {"<region>": [...]}}.');
             }
 
-            $unknownRegions = array_diff(array_map('strval', array_keys($elements)), $this->gateway->regionsFor($docType));
-
-            if ($unknownRegions !== []) {
-                $warnings[] = sprintf(
-                    'Regions %s are not used by this document type (it renders: %s).',
-                    implode(', ', $unknownRegions),
-                    implode(', ', $this->gateway->regionsFor($docType))
-                );
-            }
+            DocumentGateway::assertRegionsRendered($docType, $elements, $this->gateway->renderedRegions($docType));
 
             foreach ($elements as $name => $region) {
                 if (! is_array($region) || ($region !== [] && ! array_is_list($region))) {
@@ -344,6 +307,27 @@ final class CreateDocument implements ToolInterface, AnnotatedToolInterface
         $validated = DocumentSettings::validate($docType, array_intersect_key($kept, array_flip($allowed)));
 
         return [$elements, array_merge($kept, $validated)];
+    }
+
+    /**
+     * The regions each layout type on this site renders, for the descriptions:
+     * "header: top, right, bottom, left; footer: footer; ...".
+     */
+    private function regionSummary(): string
+    {
+        $parts = [];
+
+        foreach ($this->gateway->availableTypes() as $type) {
+            $docType = $this->gateway->docTypeForType($type);
+
+            if ($this->gateway->isComponentDocType($docType)) {
+                continue;
+            }
+
+            $parts[] = $type . ': ' . implode(', ', $this->gateway->renderedRegions($docType));
+        }
+
+        return implode('; ', $parts);
     }
 
     /**

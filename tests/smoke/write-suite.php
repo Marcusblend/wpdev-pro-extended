@@ -419,6 +419,12 @@ foreach (['api', 'fallback'] as $mode) {
         S::isError(S::call('create_document', ['type' => 'header', 'title' => $badTitle, 'slug' => 'nope']), 'slug is for components only', 'component');
         S::isError(S::call('create_document', ['type' => 'footer', 'title' => $badTitle, 'layout_data' => ['settings' => [], 'regions' => ['footer' => $invalidPage]]]), 'an invalid layout is rejected', 'failed validation');
         S::isError(S::call('create_document', ['type' => 'component', 'title' => $badTitle, 'layout_data' => ['elements' => ['e1' => ['_type' => 'text']]]]), 'component data without a root is rejected', 'root');
+        S::isError(S::call('create_document', ['type' => 'layout_single', 'title' => $badTitle, 'layout_data' => ['settings' => [], 'regions' => ['content' => []]]]), 'a region the type does not render is an error', 'not rendered');
+        S::isError(S::call('create_document', ['type' => 'header', 'title' => $badTitle, 'preset' => 'header.simple']), 'header presets are gone', 'preset');
+
+        if (isset($docs['footer'])) {
+            S::isError(S::call('deploy_layout', ['post_id' => $docs['footer']['id'], 'layout_data' => ['settings' => [], 'regions' => ['content' => []]]]), 'deploy_layout refuses a region the type does not render', 'not rendered');
+        }
         S::check(get_posts(['post_type' => ['cs_header', 'cs_footer', 'cs_global_block'], 'post_status' => 'tco-data', 'title' => $badTitle, 'fields' => 'ids', 'suppress_filters' => true]) === [], 'rejected calls create nothing');
 
         // Assign the header to the entire site, check the homepage, unassign.

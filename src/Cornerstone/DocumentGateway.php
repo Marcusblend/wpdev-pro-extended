@@ -317,6 +317,74 @@ final class DocumentGateway
     }
 
     /**
+     * Regions Cornerstone renders for a layout document: the document class's
+     * getRegions(), passed through `cs_layout_type_required_regions` the way
+     * Layout::transformElements() does. A region outside this list is stored
+     * but never loaded, so its elements are silently lost.
+     *
+     * Falls back to the known names (regionsFor()) when the Document API is
+     * unavailable.
+     *
+     * @return string[]
+     */
+    public function renderedRegions(string $docType): array
+    {
+        if (! $this->isComponentDocType($docType) && $this->apiAvailable()) {
+            try {
+                $class = '\\' . self::DOCUMENT_CLASS;
+                $doc = $class::create($docType);
+
+                if (is_object($doc) && method_exists($doc, 'getRegions')) {
+                    $regions = apply_filters('cs_layout_type_required_regions', (array) $doc->getRegions(), $doc);
+                    $regions = array_values(array_filter(
+                        array_map('strval', is_array($regions) ? $regions : []),
+                        static fn(string $region): bool => $region !== ''
+                    ));
+
+                    if ($regions !== []) {
+                        return $regions;
+                    }
+                }
+            } catch (\Throwable) {
+                // Fall back to the known names below.
+            }
+        }
+
+        return $this->regionsFor($docType);
+    }
+
+    /**
+     * Refuse a regions map that names a region the document type does not
+     * render. A missing region is fine (Cornerstone fills it empty); an extra
+     * one is stored and never shown, which is how a single layout written with
+     * a "content" region ended up assigned site-wide and empty.
+     *
+     * @param  array<string|int, mixed> $regions  The regions map being written.
+     * @param  string[]                 $rendered renderedRegions() for the type.
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function assertRegionsRendered(string $docType, array $regions, array $rendered): void
+    {
+        $unused = array_values(array_diff(array_map('strval', array_keys($regions)), $rendered));
+
+        if ($unused === []) {
+            return;
+        }
+
+        $quote = static fn(array $names): string => implode(', ', array_map(static fn(string $name): string => '"' . $name . '"', $names));
+
+        throw new \InvalidArgumentException(sprintf(
+            '%s %s not rendered by a %s document, so %s elements would be saved and never shown. Its regions are: %s. Nothing was written.',
+            count($unused) === 1 ? 'Region' : 'Regions',
+            $quote($unused) . (count($unused) === 1 ? ' is' : ' are'),
+            $docType,
+            count($unused) === 1 ? 'its' : 'their',
+            $rendered === [] ? '(none)' : $quote($rendered)
+        ));
+    }
+
+    /**
      * Setting keys Cornerstone persists in post_content for this doc type.
      *
      * @return string[]
