@@ -178,7 +178,8 @@ S::check(count($tools) === 46, 'lists 46 tools', (string) count($tools));
 S::check(array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools)) === [], 'lists the 14 original and 12 newer tools', implode(', ', array_diff(array_merge(array_keys($baseline), $newTools), array_keys($tools))));
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 S::check(($tools['upload_media']['annotations']['openWorldHint'] ?? null) === true, 'upload_media is open-world');
-S::check(count(array_filter($tools, static fn($t) => ($t['annotations']['openWorldHint'] ?? null) === true)) === 1, 'no other tool is open-world');
+S::check(($tools['render_preview']['annotations']['openWorldHint'] ?? null) === true && ($tools['render_preview']['annotations']['readOnlyHint'] ?? null) === true, 'render_preview is read-only and open-world: it runs shortcodes, Twig and External API loopers');
+S::check(count(array_filter($tools, static fn($t) => ($t['annotations']['openWorldHint'] ?? null) === true)) === 2, 'no other tool is open-world');
 
 foreach ($baseline as $name => [$properties, $required]) {
     $schema = $tools[$name]['inputSchema'] ?? [];
