@@ -95,3 +95,22 @@ T::same(['active' => true, 'pro' => false, 'version' => '6.3.0'], Extensions::ac
 T::same(true, Extensions::acf(true, true, null, '6.3.0')['pro'], 'the ACF_PRO constant marks Pro');
 T::same(true, Extensions::acf(true, false, true, '6.3.0')['pro'], 'so does acf_get_setting("pro")');
 T::same(['active' => false, 'pro' => false, 'version' => null], Extensions::acf(false, true, true, '6.3.0'), 'no ACF, no Pro');
+
+// ─── Symlinked roots (WP Engine defines paths through /sites/<install>) ──────
+
+$realBase = sys_get_temp_dir() . '/pe-ext-real-' . getmypid();
+$linkBase = sys_get_temp_dir() . '/pe-ext-link-' . getmypid();
+@mkdir($realBase . '/themes/pro/cornerstone/includes', 0777, true);
+file_put_contents($realBase . '/themes/pro/cornerstone/includes/x.php', '<?php');
+@symlink($realBase, $linkBase);
+
+if (is_link($linkBase)) {
+    T::same(
+        'cornerstone',
+        \ProExtended\Site\Extensions::sourceOf($realBase . '/themes/pro/cornerstone/includes/x.php', ['cornerstone' => $linkBase . '/themes/pro/cornerstone/']),
+        'a file PHP reports by its real path matches a root defined through a symlink'
+    );
+}
+
+@unlink($realBase . '/themes/pro/cornerstone/includes/x.php');
+@unlink($linkBase);

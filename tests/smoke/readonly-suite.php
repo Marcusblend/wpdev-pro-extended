@@ -522,7 +522,7 @@ $twigLint = S::ok(S::call('validate_layout', ['layout_data' => [[
     '_bp_base'     => pro_extended()->elementContext()->breakpointTag(),
     'text_content' => 'PE TEST {% if %}broken{% endif %}',
 ]]]), 'validate a broken Twig string');
-S::check(array_intersect(['twig-syntax', 'twig-off'], (array) ($twigLint['codes'] ?? [])) !== [], 'it is reported as twig-syntax or twig-off', (string) wp_json_encode($twigLint['codes'] ?? null));
+S::check(array_intersect(['twig-syntax', 'twig-off'], array_keys((array) ($twigLint['codes'] ?? []))) !== [], 'it is reported as twig-syntax or twig-off', (string) wp_json_encode($twigLint['codes'] ?? null));
 
 $divSchema = S::ok(S::call('get_element_schema', ['element_type' => 'layout-div', 'search' => 'tag']), 'get_element_schema layout-div');
 S::check(isset($divSchema['emits']['selector']['specificity']) && is_array($divSchema['notes'] ?? null), 'it carries emits and the clearfix note');

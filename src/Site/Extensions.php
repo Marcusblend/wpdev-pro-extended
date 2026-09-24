@@ -259,6 +259,16 @@ final class Extensions
 
     private static function path(string $path): string
     {
+        // Hosts such as WP Engine define the WordPress constants through a
+        // symlinked path (/sites/<install>/…) while PHP reports the files it
+        // loaded by their real path (/nas/content/live/<install>/…), so both
+        // sides are resolved before they are compared.
+        $real = @realpath($path);
+
+        if (is_string($real) && $real !== '') {
+            $path = $real;
+        }
+
         $path = str_replace('\\', '/', $path);
 
         return (string) preg_replace('#/+#', '/', $path);
