@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\DocumentAssets;
 use ProExtended\Cornerstone\DocumentGateway;
+use ProExtended\Cornerstone\Permissions;
+use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Settings\SettingsBackups;
 use ProExtended\Settings\ThemeOptionsReader;
 use ProExtended\Settings\ThemeOptionsWriter;
@@ -26,7 +29,7 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Write Theme Options. options is a map of key => value; get_theme_options lists the keys, their labels, current values and defaults. Each key is saved the way the Theme Options panel saves it (the before and after save actions fire, then the generated styles are purged), and every key is backed up first so restore_settings can put it back. A key this site does not register is refused, as are the keys another tool owns — Global CSS and JS, the palette, fonts — and the breakpoint and stack keys, which would reinterpret stored element data. Responsive variants ("<key>_bp_data4_4") are allowed alongside their key. Run with dry_run: true first: it reports the before and after of every key without writing.';
+        return 'Write Theme Options. options is a map of key => value; get_theme_options lists the keys, their labels, current values and defaults. Each key is saved the way the Theme Options panel saves it (the before and after save actions fire, then the generated styles are purged), and every key is backed up first so restore_settings can put it back. A key this site does not register is refused, as are the keys another tool owns — Global CSS and JS, the palette, fonts — and the breakpoint and stack keys, which would reinterpret stored element data. Responsive variants ("<key>_bp_data4_4") are allowed alongside their key. Twig is switched on here: {"cs_twig_enabled": true}, with its sub-toggles (cs_twig_extension_wordpress, cs_twig_extension_html_extra, cs_twig_extension_string_extra, cs_twig_extension_directory_loader, cs_twig_extension_debug, cs_twig_autoescape, cs_twig_cache); cs_twig_extension_advanced, which lets Twig run any PHP function, is refused. Twig templates are cs_twig_templates, a list of {"id", "title", "template"} checked before it is written (include one with {% include \'cs-template:<id>\' %}; get_native_reference section "twig" lists them). Site-wide Custom Assets are cs_custom_scripts ({src, id, type, deps, ver, async, defer, nomodule, in_footer}) and cs_custom_styles ({src, id, rel, media}): https URLs only, checked and completed with the builder\'s defaults, and they need unfiltered_html and Cornerstone\'s global.document_assets permission. Run with dry_run: true first: it reports the before and after of every key without writing.';
     }
 
     public function inputSchema(): array
@@ -64,6 +67,17 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
 
         if ($plan['errors'] !== []) {
             throw new \InvalidArgumentException("These options could not be written:\n- " . implode("\n- ", $plan['errors']));
+        }
+
+        // Site-wide Custom Assets load external scripts on every page.
+        if (ThemeOptionsWriter::touchesDocumentAssets($plan['writes'])) {
+            if (! current_user_can('unfiltered_html')) {
+                throw new ToolPermissionException('Writing cs_custom_scripts or cs_custom_styles requires the unfiltered_html capability.');
+            }
+
+            if ((new Permissions())->userCan(DocumentAssets::PERMISSION) === false) {
+                throw new ToolPermissionException(sprintf('Cornerstone denies "%s" to this user, which Custom Assets need.', DocumentAssets::PERMISSION));
+            }
         }
 
         $result = [

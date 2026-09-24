@@ -163,7 +163,33 @@ final class ElementContext
             $this->looperChecker(),
             $this->cssPropertyChecker(),
             $this->styleKeyReader(),
+            ...$this->twigLintContext(),
         );
+    }
+
+    /**
+     * Twig's switch and a parse-only checker for the twig-off and
+     * twig-syntax lints. The environment is only built when Twig is on; if
+     * Cornerstone cannot build it, twig-syntax is skipped rather than failing
+     * the validation.
+     *
+     * @return array{twigEnabled: bool|null, twigParser: (\Closure(string): ?string)|null}
+     */
+    private function twigLintContext(): array
+    {
+        try {
+            $enabled = \ProExtended\Site\Features::twigEnabled();
+        } catch (\Throwable) {
+            return ['twigEnabled' => null, 'twigParser' => null];
+        }
+
+        try {
+            $parser = $enabled ? TwigCatalog::parser() : null;
+        } catch (\Throwable) {
+            $parser = null;
+        }
+
+        return ['twigEnabled' => $enabled, 'twigParser' => $parser];
     }
 
     /**

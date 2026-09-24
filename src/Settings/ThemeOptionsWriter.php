@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace ProExtended\Settings;
 
+use ProExtended\Cornerstone\DocumentAssets;
+
 /**
  * Decides what a theme option write may change, before anything is written.
  *
@@ -42,6 +44,7 @@ final class ThemeOptionsWriter
         'cs_theme_variables'  => 'Global variables are written with set_variables, which validates each name and backs the list up.',
         'cs_global_parameter_json' => 'Global parameters are written with set_global_parameters, which checks the schema against the values.',
         'cs_global_parameter_data' => 'Global parameter values are written with set_global_parameters, which checks them against the schema.',
+        'cs_twig_extension_advanced' => 'The Advanced Twig extension lets any Twig string call any PHP function and fire WordPress actions, which is arbitrary PHP on the site; switch it in the Theme Options panel if it is ever truly needed.',
     ];
 
     /** Suffixes that carry responsive data for a registered key. */
@@ -84,6 +87,15 @@ final class ThemeOptionsWriter
                 continue;
             }
 
+            $problems = self::valueErrors($key, $value);
+
+            if ($problems !== []) {
+                array_push($errors, ...$problems);
+                continue;
+            }
+
+            $value = self::normalizeValue($key, $value);
+
             $was = $current[$key] ?? null;
 
             if (self::same($was, $value)) {
@@ -113,6 +125,50 @@ final class ThemeOptionsWriter
         $position = strpos($key, self::RESPONSIVE_PREFIX);
 
         return $position === false || $position === 0 ? $key : substr($key, 0, $position);
+    }
+
+    /**
+     * Keys whose stored shape Cornerstone reads without checking, so a bad
+     * value breaks rendering: they are validated before they are written.
+     *
+     * @return string[]
+     */
+    public static function valueErrors(string $key, mixed $value): array
+    {
+        return match ($key) {
+            TwigTemplates::OPTION => TwigTemplates::errors($value),
+            DocumentAssets::OPTION_SCRIPTS, DocumentAssets::OPTION_STYLES => DocumentAssets::optionErrors($key, $value),
+            default               => [],
+        };
+    }
+
+    /**
+     * A validated value completed the way the builder stores it (Custom
+     * Assets items take the list control's defaults).
+     */
+    public static function normalizeValue(string $key, mixed $value): mixed
+    {
+        return match ($key) {
+            DocumentAssets::OPTION_SCRIPTS => DocumentAssets::scripts($value, $key),
+            DocumentAssets::OPTION_STYLES  => DocumentAssets::styles($value, $key),
+            default                        => $value,
+        };
+    }
+
+    /**
+     * Keys whose writes need Cornerstone's Custom Assets permission.
+     *
+     * @param  array<int, array<string, mixed>> $writes plan()['writes']
+     */
+    public static function touchesDocumentAssets(array $writes): bool
+    {
+        foreach ($writes as $write) {
+            if (in_array(self::baseKey((string) ($write['key'] ?? '')), [DocumentAssets::OPTION_SCRIPTS, DocumentAssets::OPTION_STYLES], true)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static function isStorable(mixed $value): bool

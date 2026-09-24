@@ -21,7 +21,7 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Fingerprint the Cornerstone platform this site runs — versions, element types and their migration versions, document types, theme option keys, dynamic content groups, looper providers and permissions — and compare it with the last stored fingerprint. This is how a Themeco release is noticed: the diff says which element types appeared, which migrations moved, which theme options or token groups are new. The extensions block reads the live registries and names the plugin behind each element, Dynamic Content group and looper provider. Pass save: true to store the current fingerprint as the one future calls compare against. Read-only otherwise.';
+        return 'Fingerprint the Cornerstone platform this site runs — versions, element types and their migration versions, document types, theme option keys, dynamic content groups, looper providers, permissions, and the native registries get_native_reference reads (Twig functions, filters and tests; condition rules; looper providers; parameter types; null while one cannot be read, e.g. Twig while it is off) — and compare it with the last stored fingerprint. This is how a Themeco release is noticed: the diff says which element types appeared, which migrations moved, which theme options or token groups are new. The extensions block reads the live registries and names the plugin behind each element, Dynamic Content group and looper provider. Pass save: true to store the current fingerprint as the one future calls compare against. Read-only otherwise.';
     }
 
     public function inputSchema(): array
@@ -72,7 +72,10 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
                 'dynamic_content_groups' => count($current['dynamic_content_groups']),
                 'looper_types'           => count($current['looper_types']),
                 'permissions'            => count($current['permissions']),
-            ],
+            ] + array_map(
+                static fn (mixed $list): ?int => is_array($list) ? count($list) : null,
+                array_intersect_key($current, array_flip(PlatformBaseline::NATIVE_KEYS))
+            ),
             'baseline'            => $stored === null ? null : [
                 'taken_at'            => $stored['taken_at'] ?? null,
                 'cornerstone_version' => $stored['cornerstone_version'] ?? null,
@@ -96,7 +99,7 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
                 'dynamic_content_groups' => $current['dynamic_content_groups'],
                 'looper_types'           => $current['looper_types'],
                 'permissions'            => $current['permissions'],
-            ];
+            ] + array_intersect_key($current, array_flip(PlatformBaseline::NATIVE_KEYS));
         }
 
         if ($save) {

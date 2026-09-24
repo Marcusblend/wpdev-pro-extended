@@ -18,7 +18,7 @@ final class ListDynamicContent implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'List the Dynamic Content tokens this site has: every group and field, the token each one writes ({{dc:post:title}}), and the named arguments a field takes. Which groups exist depends on what is installed — ACF, WooCommerce, The Events Calendar and the Cornerstone extensions each add their own — and a token for a field the site does not have renders as nothing rather than raising an error, so this is worth checking before writing one. Narrow with group or search.';
+        return 'Deprecated: use get_native_reference with section "dynamic_content", which returns the same result (this alias is removed after 1.5). List the Dynamic Content tokens this site has: every group and field, the token each one writes ({{dc:post:title}}), and the named arguments a field takes. A token for a field the site does not have renders as nothing rather than raising an error. Narrow with group or search.';
     }
 
     public function inputSchema(): array
@@ -46,11 +46,23 @@ final class ListDynamicContent implements ToolInterface, AnnotatedToolInterface
     {
         Args::rejectUnknown($arguments, ['group', 'search', 'groups_only'], 'arguments');
 
+        return self::present($this->catalog->all(), $arguments);
+    }
+
+    /**
+     * The catalog narrowed the way the arguments ask. Shared with
+     * get_native_reference's dynamic_content section.
+     *
+     * @param  array{groups: array<int, array<string, mixed>>, fields: array<int, array<string, mixed>>} $catalog
+     * @param  array<string, mixed>                                                                       $arguments group, search, groups_only.
+     * @return array<string, mixed>
+     */
+    public static function present(array $catalog, array $arguments): array
+    {
         $group = Args::string($arguments, 'group', null, 100);
         $search = Args::string($arguments, 'search', null, 200);
         $groupsOnly = Args::bool($arguments, 'groups_only', false);
 
-        $catalog = $this->catalog->all();
         $groups = $catalog['groups'];
         $fields = $catalog['fields'];
 

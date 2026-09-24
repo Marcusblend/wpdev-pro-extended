@@ -20,7 +20,7 @@ final class ValidateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Validate a Cornerstone layout JSON structure against the element schema. Checks element types, hierarchy rules, _bp_data format, and component instances (unknown component_id or undeclared parameters produce warnings).';
+        return 'Validate a Cornerstone layout JSON structure against the element schema. Checks element types, hierarchy rules, _bp_data format, and component instances (unknown component_id or undeclared parameters produce warnings). Element data is linted too: strings holding Twig are parsed (never rendered) with the site\'s Twig environment and reported as twig-syntax with Twig\'s message when they fail, or as twig-off when Twig is switched off.';
     }
 
     public function inputSchema(): array

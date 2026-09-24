@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace ProExtended\Mcp\Tools;
 
 use ProExtended\Elements\ControlSurface;
+use ProExtended\Elements\ElementStyleFacts;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Support\Args;
 
@@ -21,7 +22,7 @@ final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Get the settings a Cornerstone element type has, grouped the way the builder\'s Inspector groups them: tab, panel, label, control type, the values it accepts, its default, and the flat key or keys it writes. Use this to build an element from its own settings rather than a css block, so the client can adjust it in the builder afterwards. Each control lists keys (what to set on the element) and, where a control writes several at once, named_keys mapping a friendly name to its key — text-format, for instance, maps font_size to text_font_size. writes says whether a setting changes style, markup, or both. Pass search to narrow to matching controls ("font size", "flex", "text_font_family"). format: "raw" returns Cornerstone\'s unprocessed definition instead, which is large.';
+        return 'Get the settings a Cornerstone element type has, grouped the way the builder\'s Inspector groups them: tab, panel, label, control type, the values it accepts, its default, and the flat key or keys it writes. Use this to build an element from its own settings rather than a css block, so the client can adjust it in the builder afterwards. Each control lists keys (what to set on the element) and, where a control writes several at once, named_keys mapping a friendly name to its key — text-format, for instance, maps font_size to text_font_size. writes says whether a setting changes style, markup, or both. Pass search to narrow to matching controls ("font size", "flex", "text_font_family"). A tag control lists the tags it accepts (accepts.tags). emits says what the element\'s style template always outputs and the selector specificity Cornerstone writes it with (one generated class, 0,1,0), where the TSS source can be read; notes carry quirks such as the Section and Div clearfix under display grid or flex. format: "raw" returns Cornerstone\'s unprocessed definition instead, which is large.';
     }
 
     public function inputSchema(): array
@@ -99,8 +100,48 @@ final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
             $result['note'] = 'This site returned no Inspector data for the element. Call with format: "raw" for the stored defaults.';
         }
 
+        $result += self::elementFacts($type);
+
         return $result;
     }
+
+    /**
+     * Facts builds had to discover by trial: what the element's styles always
+     * emit and at what specificity, and layout quirks worth knowing.
+     *
+     * @return array<string, mixed>
+     */
+    private static function elementFacts(string $type): array
+    {
+        $facts = [];
+
+        try {
+            $facts['emits'] = (new ElementStyleFacts())->emits($type);
+        } catch (\Throwable $e) {
+            $facts['emits'] = ['unavailable' => 'The style template could not be read: ' . $e->getMessage()];
+        }
+
+        $notes = self::NOTES[$type] ?? [];
+
+        if ($notes !== []) {
+            $facts['notes'] = $notes;
+        }
+
+        return $facts;
+    }
+
+    /**
+     * Element type => notes the surface cannot express on its own.
+     */
+    private const NOTES = [
+        'section' => [
+            'Pro gives sections a clearfix (::before and ::after with content). With display set to grid or flex those pseudo-elements become grid or flex items: an empty first and last grid cell, or extra gaps with space-between. Lay out the children with a Row, Grid or Div inside the section, or hide them in the section\'s css: $el::before, $el::after { display: none; }',
+        ],
+        'layout-div' => [
+            'Pro gives containers a clearfix (::before and ::after with content). When a Div\'s display is grid (or flex with space-between), those pseudo-elements become items: an empty first and last grid cell, or extra gaps. Use a Grid element for grids, or hide them in the Div\'s css: $el::before, $el::after { display: none; }',
+            'layout_div_tag takes the tags listed on its control; with "a" the Div renders as a link (layout_div_href).',
+        ],
+    ];
 
     public function annotations(): array
     {

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace ProExtended\Mcp\Tools;
 
+use ProExtended\Cornerstone\DocumentAssets;
 use ProExtended\Layouts\LayoutOutline;
 use ProExtended\Layouts\LayoutService;
 use ProExtended\Support\Args;
@@ -21,7 +22,7 @@ final class GetLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Get the full Cornerstone layout data for a specific post. Returns the JSON structure with post metadata, checksum, and the element tree. For large documents pass summary: true to get an outline (paths, types, labels, child counts) and the document size, then pass path to fetch one subtree (update_layout dot paths such as "0._modules.1" or "regions.top.0"; an element ID such as "e5" in component documents).';
+        return 'Get the full Cornerstone layout data for a specific post. Returns the JSON structure with post metadata, checksum, and the element tree. For large documents pass summary: true to get an outline (paths, types, labels, child counts) and the document size, then pass path to fetch one subtree (update_layout dot paths such as "0._modules.1" or "regions.top.0"; an element ID such as "e5" in component documents). A document with Custom Assets also returns document_assets (its customScripts and customStyles).';
     }
 
     public function inputSchema(): array
@@ -65,6 +66,16 @@ final class GetLayout implements ToolInterface, AnnotatedToolInterface
         $maxDepth = Args::int($arguments, 'max_depth', 4, 1, 50) ?? 4;
 
         $envelope = $this->layouts->get($postId);
+
+        // Custom Assets (Cornerstone 7.9) live in post meta beside the data.
+        $assets = DocumentAssets::forDocument($postId);
+
+        if ($assets['scripts'] !== [] || $assets['styles'] !== []) {
+            $envelope['document_assets'] = [
+                DocumentAssets::SETTING_SCRIPTS => $assets['scripts'],
+                DocumentAssets::SETTING_STYLES  => $assets['styles'],
+            ];
+        }
 
         if (! $summary && ($path === null || $path === '')) {
             return $envelope;

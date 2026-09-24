@@ -20,6 +20,14 @@ final class PlatformBaseline
     public const OPTION = 'pe_platform_baseline';
 
     /**
+     * Native registry fingerprints (1.5). Unlike the lists above, a side that
+     * is null (the registry could not be read, or Twig is off) or missing (a
+     * baseline saved before 1.5) is not compared, so turning Twig on or
+     * upgrading Pro Extended does not read as a Themeco change.
+     */
+    public const NATIVE_KEYS = ['twig_functions', 'twig_filters', 'twig_tests', 'condition_rules', 'looper_providers', 'parameter_types'];
+
+    /**
      * Compare two snapshots.
      *
      * @param  array<string, mixed>|null $before
@@ -71,6 +79,25 @@ final class PlatformBaseline
 
         if ($bumped !== []) {
             $changes[] = ['kind' => 'migrations', 'what' => 'migrations', 'items' => $bumped];
+        }
+
+        foreach (self::NATIVE_KEYS as $key) {
+            if (! is_array($before[$key] ?? null) || ! is_array($after[$key] ?? null)) {
+                continue;
+            }
+
+            $was = self::strings($before[$key]);
+            $now = self::strings($after[$key]);
+            $added = array_values(array_diff($now, $was));
+            $removed = array_values(array_diff($was, $now));
+
+            if ($added !== []) {
+                $changes[] = ['kind' => 'added', 'what' => $key, 'items' => $added];
+            }
+
+            if ($removed !== []) {
+                $changes[] = ['kind' => 'removed', 'what' => $key, 'items' => $removed];
+            }
         }
 
         return ['drifted' => $changes !== [], 'changes' => $changes];

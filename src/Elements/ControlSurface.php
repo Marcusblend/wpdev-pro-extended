@@ -90,6 +90,17 @@ final class ControlSurface
         'dropdown', 'anchor', 'nav', 'sub', 'text', 'marker', 'bar', 'thumb',
     ];
 
+    /**
+     * The tags Cornerstone 7.9.4's layout tag control offers
+     * (registry-setup.php: $layout_tags plus options_choices_layout_tags),
+     * used only for a tag key whose control is free text.
+     */
+    public const LAYOUT_TAGS = [
+        'div', 'section', 'article', 'aside', 'header', 'footer', 'figure', 'ul', 'ol', 'li', 'hgroup',
+        'main', 'nav', 'search', 'address', 'figcaption', 'a', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'form', 'fieldset', 'legend', 'label',
+    ];
+
     /** Control types that hold other controls rather than writing keys themselves. */
     private const CONTAINER_TYPES = ['group', 'group-module'];
 
@@ -319,6 +330,11 @@ final class ControlSurface
         }
 
         $accepts = self::accepts($control);
+        $tags = self::tags($keys, (string) ($control['type'] ?? ''), $accepts);
+
+        if ($tags !== []) {
+            $accepts += $tags;
+        }
 
         if ($accepts !== []) {
             $row['accepts'] = $accepts;
@@ -374,6 +390,12 @@ final class ControlSurface
             $choices = [];
 
             foreach ($options['choices'] as $value => $choice) {
+                // Cornerstone writes most choices as a list of {value, label};
+                // the value is what the key stores, not the list position.
+                if (is_array($choice) && array_key_exists('value', $choice) && is_scalar($choice['value'])) {
+                    $value = $choice['value'] === false ? 'false' : ($choice['value'] === true ? 'true' : (string) $choice['value']);
+                }
+
                 $choices[(string) $value] = is_array($choice)
                     ? (string) ($choice['label'] ?? $choice['title'] ?? $value)
                     : (string) $choice;
@@ -399,6 +421,43 @@ final class ControlSurface
         return $accepts;
     }
 
+
+    /**
+     * The HTML tags a tag control accepts.
+     *
+     * A select or choose lists its own (Cornerstone's layout tag controls use
+     * options_choices_layout_tags). A tag written as free text has no list of
+     * its own, so the tags Cornerstone's layout tag control offers
+     * (registry-setup.php, 7.9.4) are given as the documented set.
+     *
+     * @param  string[]             $keys
+     * @param  array<string, mixed> $accepts
+     * @return array<string, mixed>
+     */
+    private static function tags(array $keys, string $type, array $accepts): array
+    {
+        $isTag = false;
+
+        foreach ($keys as $key) {
+            if ($key === 'tag' || str_ends_with($key, '_tag')) {
+                $isTag = true;
+            }
+        }
+
+        if (! $isTag) {
+            return [];
+        }
+
+        if (isset($accepts['choices']) && is_array($accepts['choices']) && $accepts['choices'] !== []) {
+            return ['tags' => array_map('strval', array_keys($accepts['choices']))];
+        }
+
+        if (in_array($type, ['text', 'text-input', ''], true)) {
+            return ['tags' => self::LAYOUT_TAGS, 'tags_source' => 'documented: the tags Cornerstone\'s layout tag control offers; the element prints the tag it is given, so keep to block-level tags that may hold its children'];
+        }
+
+        return [];
+    }
 
     /**
      * Every style key the element writes, and the CSS property it sets.

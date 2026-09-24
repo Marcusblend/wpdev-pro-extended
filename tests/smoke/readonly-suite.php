@@ -468,6 +468,69 @@ if ($componentDocId > 0) {
     echo '      codes: ' . wp_json_encode($storedResult['codes'] ?? null) . "\n";
 }
 
+// 23. Native reference, Global JS and element facts (1.5) --------------------------------
+
+S::section('23 native reference (1.5)');
+
+$jsKey = $gateway->globalJsKey();
+$jsBefore = S::rawOption($jsKey);
+
+$sections = ['dynamic_content', 'twig', 'conditions', 'loopers', 'parameter_types', 'regions'];
+$reference = [];
+
+foreach ($sections as $section) {
+    $reference[$section] = S::ok(S::call('get_native_reference', ['section' => $section]), "get_native_reference {$section}");
+
+    if (isset($reference[$section]['unavailable'])) {
+        S::attention("{$section} unavailable: " . $reference[$section]['unavailable']);
+    }
+}
+
+$legacy = S::ok(S::call('list_dynamic_content', ['groups_only' => true]), 'list_dynamic_content still answers');
+S::check(($reference['dynamic_content']['group_count'] ?? null) === ($legacy['group_count'] ?? null), 'dynamic_content matches the deprecated alias', (string) ($legacy['group_count'] ?? '?'));
+S::check(is_bool($reference['twig']['enabled'] ?? null) && is_array($reference['twig']['toggles'] ?? null), 'twig reports the switch and its toggles');
+S::check(($reference['twig']['toggles']['cs_twig_extension_advanced']['writable'] ?? null) === false, 'the Advanced toggle is reported as not writable');
+
+if (($reference['twig']['enabled'] ?? false) === true) {
+    S::check(in_array('date', (array) ($reference['twig']['environment']['filters'] ?? []), true) && in_array('range', (array) ($reference['twig']['environment']['functions'] ?? []), true), 'the live environment lists date and range', (string) wp_json_encode(array_map('count', array_filter((array) ($reference['twig']['environment'] ?? []), 'is_array'))));
+    S::check(in_array('post', (array) ($reference['twig']['environment']['globals'] ?? []), true), 'Dynamic Content groups are Twig globals');
+} else {
+    S::check(isset($reference['twig']['environment']['unavailable']), 'with Twig off the environment says why');
+}
+
+$showRules = array_column((array) ($reference['conditions']['show_conditions']['rules'] ?? []), 'condition');
+S::check(in_array('global:user-loggedin', $showRules, true) && in_array('expression:string', $showRules, true), 'show conditions include global and expression rules', (string) count($showRules));
+S::check(in_array('site:entire-site', array_column((array) ($reference['conditions']['assignments']['rules'] ?? []), 'condition'), true), 'assignments include site:entire-site');
+$providers = array_column((array) ($reference['loopers']['providers'] ?? []), null, 'provider');
+S::check(isset($providers['query-recent']) && ($providers['query-recent']['item'] ?? null) === 'post', 'loopers list query-recent looping posts', (string) wp_json_encode(array_keys($providers)));
+S::check(in_array('bg-image', array_column((array) ($reference['parameter_types']['managed'] ?? []), 'type'), true), 'parameter types include bg-image');
+$regions = array_column((array) ($reference['regions']['types'] ?? []), 'regions', 'type');
+S::check(($regions['header'] ?? null) === ['top', 'right', 'bottom', 'left'] && ($regions['footer'] ?? null) === ['footer'], 'regions come from the document types', (string) wp_json_encode($regions));
+S::check(in_array(S::ok(S::call('get_native_reference', ['section' => 'loopers']), 'loopers again')['cache'] ?? null, ['hit'], true), 'a second read comes from the cache');
+
+S::section('24 Global JS, Twig options and element facts (1.5)');
+
+$dryJs = S::ok(S::call('set_global_js', ['operation' => 'upsert_block', 'name' => 'pe-test', 'js' => "document.documentElement.classList.add('pe-test');", 'dry_run' => true]), 'set_global_js dry run');
+S::check(($dryJs['dry_run'] ?? null) === true && S::isNull($dryJs, 'backup_id') && str_contains((string) ($dryJs['diff'] ?? ''), '// pe:begin pe-test'), 'the dry run returns a diff and writes nothing');
+S::check(($dryJs['option_key'] ?? null) === $jsKey, 'it edits the Global JS option Cornerstone names', (string) $jsKey);
+S::isError(S::call('set_global_js', ['operation' => 'upsert_block', 'name' => 'pe-test', 'js' => '</script><script>alert(1)</script>', 'dry_run' => true]), 'a script tag is refused', 'script');
+S::isError(S::call('update_theme_options', ['options' => ['cs_twig_extension_advanced' => true], 'dry_run' => true]), 'the Advanced Twig toggle is refused', 'PHP');
+
+$twigLint = S::ok(S::call('validate_layout', ['layout_data' => [[
+    '_type'        => 'text',
+    '_m'           => ['e' => 1],
+    '_bp_base'     => pro_extended()->elementContext()->breakpointTag(),
+    'text_content' => 'PE TEST {% if %}broken{% endif %}',
+]]]), 'validate a broken Twig string');
+S::check(array_intersect(['twig-syntax', 'twig-off'], (array) ($twigLint['codes'] ?? [])) !== [], 'it is reported as twig-syntax or twig-off', (string) wp_json_encode($twigLint['codes'] ?? null));
+
+$divSchema = S::ok(S::call('get_element_schema', ['element_type' => 'layout-div', 'search' => 'tag']), 'get_element_schema layout-div');
+S::check(isset($divSchema['emits']['selector']['specificity']) && is_array($divSchema['notes'] ?? null), 'it carries emits and the clearfix note');
+echo '      emits: ' . wp_json_encode(array_diff_key((array) ($divSchema['emits'] ?? []), ['selector' => 1])) . "\n";
+$elements = array_column((array) (S::ok(S::call('list_elements'), 'list_elements')['elements'] ?? []), null, 'type');
+S::check(($elements['section']['valid_parents'] ?? null) === ['region'], 'a section\'s valid parent is the region', (string) wp_json_encode($elements['section']['valid_parents'] ?? null));
+S::check(S::rawOption($jsKey) === $jsBefore, "{$jsKey} is unchanged");
+
 // Nothing changed ------------------------------------------------------------------------
 
 S::section('nothing was written');
