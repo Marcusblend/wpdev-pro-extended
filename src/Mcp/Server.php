@@ -450,7 +450,7 @@ TXT;
             'set_variables'            => static fn() => new Tools\SetVariables($gateway, $backups),
             'set_global_parameters'    => static fn() => new Tools\SetGlobalParameters($gateway, $backups, $elements),
             'create_template'          => static fn() => new Tools\CreateTemplate($templates, $schema, $layouts),
-            'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema),
+            'import_tco'               => static fn() => new Tools\ImportTco($templates, $schema, $backups),
             'create_translation'       => static fn() => new Tools\CreateTranslation($gateway),
             'create_component'         => static fn() => new Tools\CreateComponent($layouts, $validator(), $elements),
             'set_api_allowlist'        => static fn() => new Tools\SetApiAllowlist($backups),

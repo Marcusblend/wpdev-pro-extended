@@ -234,18 +234,25 @@ final class TemplateGateway
         ];
     }
 
-    /** The largest a single .json member may expand to. */
-    private const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
+    /** The largest a single member may expand to. */
+    public const MAX_ENTRY_BYTES = 8 * 1024 * 1024;
 
     /** The largest everything in one archive may expand to together. */
-    private const MAX_EXTRACTED_BYTES = 32 * 1024 * 1024;
+    public const MAX_EXTRACTED_BYTES = 32 * 1024 * 1024;
 
     /**
      * What a .tco archive holds, without writing anything.
      *
-     * @return array{entries: array<int, array<string, mixed>>, files: string[]}
+     * Only the describe half of an import: the write is Cornerstone's own
+     * cs_import_tco(), which extracts every member itself, so every member —
+     * images as well as JSON — is held to the size limits here first. The
+     * JSON members are decoded (the manifest separately) and SVG members are
+     * returned raw so the caller can validate them; other members are only
+     * measured.
+     *
+     * @return array{files: string[], manifest: array<mixed>|null, entries: array<string, mixed>, svg: array<string, string>, bytes: int}
      */
-    public function readArchive(string $path): array
+    public static function readArchive(string $path): array
     {
         if (! class_exists('\ZipArchive')) {
             throw new \RuntimeException('This site has no ZipArchive support, so a .tco cannot be read.');
@@ -257,64 +264,81 @@ final class TemplateGateway
             throw new \RuntimeException('The file could not be opened as a .tco archive.');
         }
 
+        $tooLarge = static function () use ($zip): \RuntimeException {
+            $zip->close();
+
+            return new \RuntimeException(sprintf(
+                'The archive expands to more than %d MB, or holds a file over %d MB, so it was not read.',
+                (int) (self::MAX_EXTRACTED_BYTES / (1024 * 1024)),
+                (int) (self::MAX_ENTRY_BYTES / (1024 * 1024))
+            ));
+        };
+
         $files = [];
+        $manifest = null;
         $entries = [];
+        $svg = [];
         $extracted = 0;
 
         for ($i = 0; $i < $zip->numFiles; $i++) {
             $name = (string) $zip->getNameIndex($i);
             $files[] = $name;
 
-            if (! str_ends_with(strtolower($name), '.json')) {
-                continue;
-            }
-
             // The caller's size limit is on the *compressed* file, which says
             // nothing about what it expands to: a few hundred KB of zeros
             // inflates to gigabytes and takes the request down with it. Check
-            // the declared size before extracting, and keep a running total so
-            // a thousand small members cannot add up to the same thing.
+            // the declared size of every member before anything is extracted
+            // — here or by Cornerstone's importer afterwards — and keep a
+            // running total so a thousand small members cannot add up to the
+            // same thing.
             $stat = $zip->statIndex($i);
             $declared = is_array($stat) ? (int) ($stat['size'] ?? 0) : 0;
 
             if ($declared > self::MAX_ENTRY_BYTES || $extracted + $declared > self::MAX_EXTRACTED_BYTES) {
-                $zip->close();
-
-                throw new \RuntimeException(sprintf(
-                    'The archive expands to more than %d MB, so it was not read.',
-                    (int) (self::MAX_EXTRACTED_BYTES / (1024 * 1024))
-                ));
+                throw $tooLarge();
             }
 
-            $raw = $zip->getFromIndex($i);
+            $lower = strtolower($name);
+            $isJson = str_ends_with($lower, '.json');
+            $isSvg = str_ends_with($lower, '.svg');
 
-            if (! is_string($raw) || $raw === '') {
+            if (! $isJson && ! $isSvg) {
+                $extracted += $declared;
                 continue;
             }
 
+            $raw = $zip->getFromIndex($i);
+            $raw = is_string($raw) ? $raw : '';
+
             // statIndex() reports what the archive claims; this is what it
             // actually produced.
-            $extracted += strlen($raw);
+            $extracted += max($declared, strlen($raw));
 
-            if ($extracted > self::MAX_EXTRACTED_BYTES) {
-                $zip->close();
-
-                throw new \RuntimeException(sprintf(
-                    'The archive expands to more than %d MB, so it was not read.',
-                    (int) (self::MAX_EXTRACTED_BYTES / (1024 * 1024))
-                ));
+            if (strlen($raw) > self::MAX_ENTRY_BYTES || $extracted > self::MAX_EXTRACTED_BYTES) {
+                throw $tooLarge();
             }
 
-            $decoded = json_decode($raw, true);
+            if ($isSvg) {
+                $svg[$name] = $raw;
+                continue;
+            }
 
-            if (is_array($decoded)) {
-                $entries[] = ['file' => $name, 'data' => $decoded];
+            $decoded = $raw === '' ? null : json_decode($raw, true);
+
+            if (! is_array($decoded)) {
+                continue;
+            }
+
+            if ($name === 'manifest.json') {
+                $manifest = $decoded;
+            } else {
+                $entries[$name] = $decoded;
             }
         }
 
         $zip->close();
 
-        return ['entries' => $entries, 'files' => $files];
+        return ['files' => $files, 'manifest' => $manifest, 'entries' => $entries, 'svg' => $svg, 'bytes' => $extracted];
     }
 
     /**
