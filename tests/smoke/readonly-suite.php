@@ -87,6 +87,14 @@ if (is_array($firstComponent)) {
     S::check(($one['components'][0]['component_id'] ?? null) === $firstComponent['component_id'] && array_key_exists('parameters', (array) ($one['components'][0] ?? [])), 'search finds the component and adds its parameters');
 }
 
+$baseline = S::ok(S::call('get_platform_baseline'), 'get_platform_baseline');
+$extensions = (array) ($baseline['extensions'] ?? []);
+S::check(in_array('headline', (array) ($extensions['sources']['cornerstone']['elements'] ?? []), true), 'the element registry attributes headline to Cornerstone', (string) wp_json_encode(array_keys((array) ($extensions['sources'] ?? []))));
+S::check(($extensions['unreadable'] ?? null) === [], 'every registry could be read', (string) wp_json_encode($extensions['unreadable'] ?? null));
+S::check(isset($extensions['max']['packages'], $extensions['acf']['pro']), 'the Max products and ACF are reported with it');
+S::check(! (($extensions['acf']['pro'] ?? false) && ! defined('ACF_PRO') && ! (function_exists('acf_get_setting') && acf_get_setting('pro'))), 'free ACF is not reported as Pro');
+echo '      extension sources: ' . wp_json_encode(array_map(static fn(array $row): array => array_map('count', array_intersect_key($row, array_flip(['elements', 'dynamic_content', 'loopers']))), (array) ($extensions['sources'] ?? []))) . "\n";
+
 $layouts = S::ok(S::call('list_layouts', ['type' => 'cs_global_block']), 'list_layouts for component documents');
 
 foreach ((array) ($layouts['layouts'] ?? []) as $row) {

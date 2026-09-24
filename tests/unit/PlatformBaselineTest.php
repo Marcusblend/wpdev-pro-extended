@@ -2,7 +2,6 @@
 
 declare(strict_types=1);
 
-use ProExtended\Site\Extensions;
 use ProExtended\Site\PlatformBaseline;
 
 T::group('PlatformBaseline');
@@ -69,35 +68,3 @@ $newMigration['migrations']['table'] = 1;
 T::same(false, PlatformBaseline::diff($before, $newMigration)['drifted'], 'a migration for a type that is new is left to the element list to report');
 
 T::ok(str_contains(PlatformBaseline::summarize($diff['changes']), 'version'), 'the summary names what changed');
-
-T::group('Extensions');
-
-$present = [
-    'active_plugins' => ['cornerstone-data-tables/cornerstone-data-tables.php'],
-    'classes'        => ['Tribe__Events__Main'],
-    'constants'      => ['CS_DATA_TABLES_VERSION' => '1.4.0', 'TRIBE_EVENTS_FILE' => '/x/y.php'],
-    'elements'       => ['data-table', 'headline'],
-    'dc_groups'      => ['datatable', 'post'],
-    'loopers'        => ['posts'],
-    'post_types'     => ['tribe_events', 'page'],
-];
-
-$report = Extensions::describe($present);
-
-T::ok($report['data_tables']['active'], 'an extension is found by its plugin file');
-T::same('1.4.0', $report['data_tables']['version'], 'and reports its version');
-T::same('plugin', $report['data_tables']['detected_by'], 'and how it was found');
-T::same(['data-table'], $report['data_tables']['elements']['present'], 'the elements it contributes that this site has');
-T::ok(in_array('cs-data-table', $report['data_tables']['elements']['missing'], true), 'and the ones it does not');
-T::same(['datatable'], $report['data_tables']['dynamic_content']['present'], 'its token group is found');
-
-T::ok($report['events_calendar']['active'], 'an extension is also found by its class');
-T::same('class', $report['events_calendar']['detected_by'], 'and says so');
-T::same(['tribe_events'], $report['events_calendar']['post_types']['present'], 'its post types are reported');
-
-T::ok(! $report['charts']['active'], 'an absent extension is reported inactive');
-T::same(null, $report['charts']['version'], 'with no version');
-T::ok(! isset($report['charts']['elements']), 'and nothing is claimed about what it contributes');
-
-T::same(count(Extensions::KNOWN), count($report), 'every known extension is reported either way');
-T::same([], Extensions::describe([])['forms']['active'] ? ['unexpected'] : [], 'an empty site activates nothing');

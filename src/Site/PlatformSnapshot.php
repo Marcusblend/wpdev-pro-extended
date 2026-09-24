@@ -19,6 +19,12 @@ use ProExtended\Settings\ThemeOptionsReader;
  */
 final class PlatformSnapshot
 {
+    /** Element definition keys that hold the element's own code, in the order they say most about who wrote it. */
+    private const ELEMENT_CALLBACKS = ['render', 'builder', 'style', 'preprocess_css_data', 'children', 'tss'];
+
+    /** The class whose closures wrap another element's controls (Definition::update()). */
+    private const DEFINITION_CLASS = 'Themeco\\Cornerstone\\Elements\\Definition';
+
     public function __construct(
         private readonly SchemaExtractor $schema,
         private readonly DocumentGateway $gateway,
@@ -179,39 +185,193 @@ final class PlatformSnapshot
     }
 
     /**
-     * What the extensions on this site contribute.
+     * What the element, Dynamic Content and looper registries hold, grouped by
+     * the plugin, theme or Cornerstone whose code registered each entry, next
+     * to the Max products and ACF.
      *
-     * @return array<string, array<string, mixed>>
+     * Read from the live registries and attributed by reflecting each entry's
+     * own callbacks; nothing is matched against a list of known extensions. A
+     * registry that cannot be read is named under "unreadable".
+     *
+     * @return array<string, mixed>
      */
     public function extensions(): array
     {
-        $classes = [];
-        $constants = [];
+        if (! function_exists('get_plugins') && defined('ABSPATH')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
 
-        foreach (Extensions::KNOWN as $extension) {
-            foreach ($extension['classes'] as $class) {
-                if (class_exists($class)) {
-                    $classes[] = $class;
-                }
+        $roots = [
+            'cornerstone' => defined('CS_ROOT_PATH') ? (string) constant('CS_ROOT_PATH') : null,
+            'plugins'     => defined('WP_PLUGIN_DIR') ? (string) constant('WP_PLUGIN_DIR') : null,
+            'mu_plugins'  => defined('WPMU_PLUGIN_DIR') ? (string) constant('WPMU_PLUGIN_DIR') : null,
+            'template'    => get_template_directory(),
+            'stylesheet'  => get_stylesheet_directory(),
+        ];
+
+        $report = Extensions::describe([
+            'elements'        => $this->elementFiles($roots),
+            'dynamic_content' => $this->dynamicContentFiles($roots),
+            'loopers'         => $this->looperFiles($roots),
+        ], $roots, function_exists('get_plugins') ? (array) get_plugins() : []);
+
+        $report['active_plugins'] = count($this->activePlugins());
+        $report['max'] = Features::max();
+        $report['acf'] = Features::acf();
+
+        return $report;
+    }
+
+    /**
+     * Element type => the file its code lives in.
+     *
+     * @param  array<string, mixed> $roots
+     * @return array<string, string|null>|null Null when the registry cannot be read.
+     */
+    private function elementFiles(array $roots): ?array
+    {
+        if (! function_exists('cornerstone')) {
+            return null;
+        }
+
+        try {
+            $service = cornerstone('Elements');
+            $definitions = is_object($service) && method_exists($service, 'get_all_elements') ? $service->get_all_elements() : null;
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($definitions) || $definitions === []) {
+            return null;
+        }
+
+        $files = [];
+
+        foreach ($definitions as $type => $definition) {
+            $def = is_object($definition) && isset($definition->def) && is_array($definition->def) ? $definition->def : [];
+            $candidates = [];
+
+            foreach (self::ELEMENT_CALLBACKS as $key) {
+                $candidates[] = Extensions::callableFile($def[$key] ?? null, self::DEFINITION_CLASS);
             }
 
-            foreach ($extension['constants'] as $constant) {
-                if (defined($constant)) {
-                    $value = constant($constant);
-                    $constants[$constant] = is_scalar($value) ? (string) $value : '';
+            $files[(string) $type] = Extensions::ownerFile($candidates, $roots, false);
+        }
+
+        return $files;
+    }
+
+    /**
+     * Dynamic Content group => the file its values come from: the callbacks
+     * on `cs_dynamic_content_<group>` and on its fields' own filters.
+     *
+     * @param  array<string, mixed> $roots
+     * @return array<string, string|null>|null
+     */
+    private function dynamicContentFiles(array $roots): ?array
+    {
+        if (! function_exists('cornerstone')) {
+            return null;
+        }
+
+        try {
+            $service = cornerstone('DynamicContent');
+            $data = is_object($service) && method_exists($service, 'get_dynamic_fields') ? $service->get_dynamic_fields() : null;
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($data) || ! is_array($data['groups'] ?? null)) {
+            return null;
+        }
+
+        $fields = is_array($data['fields'] ?? null) ? $data['fields'] : [];
+        $files = [];
+
+        foreach (array_keys($data['groups']) as $group) {
+            $group = (string) $group;
+            $candidates = $this->hookFiles('cs_dynamic_content_' . $group);
+
+            foreach ($fields as $field) {
+                if (! is_array($field) || (string) ($field['group'] ?? '') !== $group) {
+                    continue;
                 }
+
+                $candidates[] = Extensions::callableFile($field['filter'] ?? null);
+                array_push($candidates, ...$this->hookFiles('cs_dynamic_content_' . $group . '_' . (string) ($field['name'] ?? '')));
+            }
+
+            // A plugin that adds to one of Cornerstone's groups does not make
+            // the group the plugin's.
+            $files[$group] = Extensions::ownerFile($candidates, $roots, true);
+        }
+
+        return $files;
+    }
+
+    /**
+     * Looper provider => the file its class or filter lives in.
+     *
+     * @param  array<string, mixed> $roots
+     * @return array<string, string|null>|null
+     */
+    private function looperFiles(array $roots): ?array
+    {
+        $class = 'Themeco\\Cornerstone\\Services\\LooperProviders';
+
+        if (! class_exists($class)) {
+            return null;
+        }
+
+        try {
+            $property = new \ReflectionProperty($class, 'providers');
+            $property->setAccessible(true);
+            $providers = $property->getValue();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (! is_array($providers)) {
+            return null;
+        }
+
+        $files = [];
+
+        foreach ($providers as $type => $provider) {
+            $provider = is_array($provider) ? $provider : [];
+
+            $files[(string) $type] = Extensions::ownerFile([
+                Extensions::classFile($provider['class'] ?? null),
+                Extensions::callableFile($provider['filter'] ?? null),
+                Extensions::callableFile($provider['controls'] ?? null),
+            ], $roots, false);
+        }
+
+        return $files;
+    }
+
+    /**
+     * The files of every callback on a hook, by priority.
+     *
+     * @return array<int, string|null>
+     */
+    private function hookFiles(string $hook): array
+    {
+        global $wp_filter;
+
+        $registered = $wp_filter[$hook] ?? null;
+        $callbacks = is_object($registered) && isset($registered->callbacks) && is_array($registered->callbacks) ? $registered->callbacks : [];
+        ksort($callbacks);
+
+        $files = [];
+
+        foreach ($callbacks as $byPriority) {
+            foreach ((array) $byPriority as $callback) {
+                $files[] = Extensions::callableFile(is_array($callback) ? ($callback['function'] ?? null) : null);
             }
         }
 
-        return Extensions::describe([
-            'active_plugins' => $this->activePlugins(),
-            'classes'        => $classes,
-            'constants'      => $constants,
-            'elements'       => $this->elementTypes(),
-            'dc_groups'      => $this->dynamicContentGroups(),
-            'loopers'        => $this->looperTypes(),
-            'post_types'     => array_values(get_post_types([], 'names')),
-        ]);
+        return $files;
     }
 
     /**

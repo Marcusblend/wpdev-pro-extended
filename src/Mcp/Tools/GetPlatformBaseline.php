@@ -21,7 +21,7 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Fingerprint the Cornerstone platform this site runs — versions, element types and their migration versions, document types, theme option keys, dynamic content groups, looper providers and permissions — and compare it with the last stored fingerprint. This is how a Themeco release is noticed: the diff says which element types appeared, which migrations moved, which theme options or token groups are new. Pass save: true to store the current fingerprint as the one future calls compare against. Read-only otherwise.';
+        return 'Fingerprint the Cornerstone platform this site runs — versions, element types and their migration versions, document types, theme option keys, dynamic content groups, looper providers and permissions — and compare it with the last stored fingerprint. This is how a Themeco release is noticed: the diff says which element types appeared, which migrations moved, which theme options or token groups are new. The extensions block reads the live registries and names the plugin behind each element, Dynamic Content group and looper provider. Pass save: true to store the current fingerprint as the one future calls compare against. Read-only otherwise.';
     }
 
     public function inputSchema(): array
@@ -39,7 +39,7 @@ final class GetPlatformBaseline implements ToolInterface, AnnotatedToolInterface
                 ],
                 'include_extensions' => [
                     'type'        => 'boolean',
-                    'description' => 'Optional. Also report what each known Cornerstone extension contributes. Default: true.',
+                    'description' => 'Optional. Also report what the element, Dynamic Content and looper registries hold, grouped by the plugin, theme or Cornerstone whose code registered each entry, with the Max products and ACF (free or Pro). Default: true.',
                 ],
             ],
         ];

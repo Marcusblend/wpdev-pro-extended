@@ -5,198 +5,271 @@ declare(strict_types=1);
 namespace ProExtended\Site;
 
 /**
- * What the Cornerstone extensions on a site add to it.
+ * What each plugin on a site adds to Cornerstone's registries.
  *
- * Each extension brings its own elements, dynamic content, looper providers
- * and sometimes post types, and anything authored against them has to know
- * which are actually there. This reports presence and contributions only: it
- * writes nothing and never reports a package URL, licence or key.
+ * Nothing here is a hand-kept list. The caller reads the live registries —
+ * element definitions, Dynamic Content groups, looper providers — and hands
+ * over, for each entry, the PHP file its code lives in (found by reflecting
+ * the entry's own callbacks: an element's render or builder callback, a
+ * group's value filter, a provider's class or filter). This works out which
+ * plugin, theme or Cornerstone itself that file belongs to and groups the
+ * entries by it. An entry whose callbacks cannot be reflected is reported
+ * under "unknown" rather than guessed at.
  *
- * Contributions are declared rather than discovered. An extension's elements
- * cannot be told apart from Cornerstone's own at runtime — the registry keeps
- * no record of who registered what — so each extension names the types it
- * brings and this reports which of them the site's registry actually has. A
- * type listed here that is missing means the extension is present but that
- * element is not registered, which is worth knowing on its own.
+ * It writes nothing and never reports a package URL, licence or key.
  *
  * Pure PHP with no WordPress calls, so it is unit-tested without a site.
  */
 final class Extensions
 {
-    /**
-     * The extensions these builds use, and what each contributes.
-     *
-     * @var array<string, array<string, mixed>>
-     */
-    public const KNOWN = [
-        'data_tables' => [
-            'label'      => 'Cornerstone Data Tables',
-            'classes'    => ['Cornerstone_Data_Tables', 'CS_Data_Tables'],
-            'constants'  => ['CS_DATA_TABLES_VERSION', 'CORNERSTONE_DATA_TABLES_VERSION'],
-            'plugins'    => ['cornerstone-data-tables/cornerstone-data-tables.php'],
-            'elements'   => ['data-table', 'cs-data-table'],
-            'dc_groups'  => ['datatable'],
-            'loopers'    => ['data_table', 'datatable'],
-            'post_types' => ['cs_data_table'],
-        ],
-        'forms' => [
-            'label'      => 'Cornerstone Forms',
-            'classes'    => ['Cornerstone_Forms', 'CS_Forms'],
-            'constants'  => ['CS_FORMS_VERSION', 'CORNERSTONE_FORMS_VERSION'],
-            'plugins'    => ['cornerstone-forms/cornerstone-forms.php'],
-            'elements'   => ['form', 'form-text', 'form-email', 'form-textarea', 'form-select', 'form-checkbox', 'form-radio', 'form-submit'],
-            'dc_groups'  => ['form'],
-            'loopers'    => ['form_entries'],
-            'post_types' => ['cs_form', 'cs_form_entry'],
-        ],
-        'charts' => [
-            'label'      => 'Cornerstone Charts',
-            'classes'    => ['Cornerstone_Charts', 'CS_Charts'],
-            'constants'  => ['CS_CHARTS_VERSION', 'CORNERSTONE_CHARTS_VERSION'],
-            'plugins'    => ['cornerstone-charts/cornerstone-charts.php'],
-            'elements'   => ['chart', 'chart-bar', 'chart-line', 'chart-pie'],
-            'dc_groups'  => ['chart'],
-            'loopers'    => [],
-            'post_types' => [],
-        ],
-        'sitedrive' => [
-            'label'      => 'SiteDrive',
-            'classes'    => ['SiteDrive', 'Cornerstone_SiteDrive'],
-            'constants'  => ['SITEDRIVE_VERSION', 'CS_SITEDRIVE_VERSION'],
-            'plugins'    => ['sitedrive/sitedrive.php', 'cornerstone-sitedrive/cornerstone-sitedrive.php'],
-            'elements'   => [],
-            'dc_groups'  => ['sitedrive'],
-            'loopers'    => ['sitedrive'],
-            'post_types' => [],
-        ],
-        'acf_pro' => [
-            'label'      => 'ACF Pro',
-            'classes'    => ['acf_pro', 'ACF'],
-            'constants'  => ['ACF_PRO', 'ACF_VERSION'],
-            'plugins'    => ['advanced-custom-fields-pro/acf.php'],
-            'elements'   => [],
-            'dc_groups'  => ['acf'],
-            'loopers'    => ['acf_repeater', 'acf_relationship', 'acf_gallery'],
-            'post_types' => ['acf-field-group', 'acf-field'],
-        ],
-        'events_calendar' => [
-            'label'      => 'The Events Calendar',
-            'classes'    => ['Tribe__Events__Main'],
-            'constants'  => ['TRIBE_EVENTS_FILE'],
-            'plugins'    => ['the-events-calendar/the-events-calendar.php'],
-            'elements'   => [],
-            'dc_groups'  => ['tribe', 'events'],
-            'loopers'    => [],
-            'post_types' => ['tribe_events', 'tribe_venue', 'tribe_organizer'],
-        ],
-    ];
+    public const CORNERSTONE = 'cornerstone';
+    public const UNKNOWN = 'unknown';
+
+    /** The registries reported, in order. */
+    public const REGISTRIES = ['elements', 'dynamic_content', 'loopers'];
 
     /**
-     * Describe every known extension against what this site actually has.
+     * Who a PHP file belongs to.
      *
-     * @param  array<string, mixed> $present    What the site reports: active plugin files,
-     *                                          defined classes and constants, registered
-     *                                          element types, dynamic content groups,
-     *                                          looper types and post types.
-     * @return array<string, array<string, mixed>>
+     * @param array{cornerstone?: string|null, plugins?: string|null, mu_plugins?: string|null, template?: string|null, stylesheet?: string|null} $roots
+     *        Cornerstone's root (CS_ROOT_PATH), the plugin and must-use
+     *        plugin directories, and the parent and child theme directories.
+     * @return string "cornerstone", "plugin:<folder>", "mu-plugin:<file>",
+     *                "child-theme:<folder>", "theme:<folder>" or "unknown".
      */
-    public static function describe(array $present): array
+    public static function sourceOf(?string $file, array $roots): string
     {
-        $plugins = self::strings($present['active_plugins'] ?? []);
-        $classes = self::strings($present['classes'] ?? []);
-        $constants = self::constants($present['constants'] ?? []);
-        $elements = self::strings($present['elements'] ?? []);
-        $groups = self::strings($present['dc_groups'] ?? []);
-        $loopers = self::strings($present['loopers'] ?? []);
-        $postTypes = self::strings($present['post_types'] ?? []);
-
-        $report = [];
-
-        foreach (self::KNOWN as $key => $extension) {
-            $byPlugin = array_values(array_intersect($extension['plugins'], $plugins));
-            $byClass = array_values(array_intersect($extension['classes'], $classes));
-            $active = $byPlugin !== [] || $byClass !== [];
-
-            $version = null;
-
-            foreach ($extension['constants'] as $constant) {
-                if (isset($constants[$constant]) && is_string($constants[$constant]) && $constants[$constant] !== '') {
-                    $version = $constants[$constant];
-                    break;
-                }
-            }
-
-            $row = [
-                'label'   => $extension['label'],
-                'active'  => $active,
-                'version' => $version,
-            ];
-
-            if (! $active) {
-                $report[$key] = $row;
-                continue;
-            }
-
-            $row['detected_by'] = $byPlugin !== [] ? 'plugin' : 'class';
-            $row['elements'] = self::split($extension['elements'], $elements);
-            $row['dynamic_content'] = self::split($extension['dc_groups'], $groups);
-            $row['loopers'] = self::split($extension['loopers'], $loopers);
-            $row['post_types'] = self::split($extension['post_types'], $postTypes);
-
-            $report[$key] = $row;
+        if ($file === null || $file === '') {
+            return self::UNKNOWN;
         }
 
-        return $report;
+        $file = self::path($file);
+
+        // Cornerstone first: it lives inside the Pro theme, or in the plugins
+        // directory when it runs standalone.
+        $cornerstone = self::root($roots['cornerstone'] ?? null);
+
+        if ($cornerstone !== null && str_starts_with($file, $cornerstone)) {
+            return self::CORNERSTONE;
+        }
+
+        foreach (['mu_plugins' => 'mu-plugin', 'plugins' => 'plugin'] as $key => $label) {
+            $root = self::root($roots[$key] ?? null);
+
+            if ($root !== null && str_starts_with($file, $root)) {
+                $first = explode('/', substr($file, strlen($root)))[0];
+
+                return $label . ':' . $first;
+            }
+        }
+
+        $stylesheet = self::root($roots['stylesheet'] ?? null);
+        $template = self::root($roots['template'] ?? null);
+
+        if ($stylesheet !== null && $stylesheet !== $template && str_starts_with($file, $stylesheet)) {
+            return 'child-theme:' . basename(rtrim($stylesheet, '/'));
+        }
+
+        if ($template !== null && str_starts_with($file, $template)) {
+            return 'theme:' . basename(rtrim($template, '/'));
+        }
+
+        return self::UNKNOWN;
     }
 
     /**
-     * Which of the things an extension brings this site actually registered.
+     * Group the registries' entries by who registered them.
      *
-     * @param  string[] $expected
-     * @param  string[] $actual
-     * @return array{present: string[], missing: string[]}
+     * @param  array<string, array<string, string|null>|null> $registries
+     *         Registry name => [entry name => file its code lives in], or
+     *         null when the registry could not be read.
+     * @param  array<string, mixed> $roots   See sourceOf().
+     * @param  array<string, array<string, mixed>> $plugins get_plugins(): "folder/file.php" => header.
+     * @return array{sources: array<string, array<string, mixed>>, counts: array<string, int>, unreadable: string[]}
      */
-    private static function split(array $expected, array $actual): array
+    public static function describe(array $registries, array $roots, array $plugins = []): array
     {
-        $present = array_values(array_intersect($expected, $actual));
+        $sources = [];
+        $counts = [];
+        $unreadable = [];
 
+        foreach (self::REGISTRIES as $registry) {
+            $entries = $registries[$registry] ?? null;
+
+            if (! is_array($entries)) {
+                $unreadable[] = $registry;
+                $counts[$registry] = 0;
+                continue;
+            }
+
+            $counts[$registry] = count($entries);
+
+            foreach ($entries as $name => $file) {
+                $source = self::sourceOf(is_string($file) ? $file : null, $roots);
+                $sources[$source] ??= self::sourceRow($source, $plugins);
+                $sources[$source][$registry][] = (string) $name;
+            }
+        }
+
+        foreach ($sources as $key => $row) {
+            foreach (self::REGISTRIES as $registry) {
+                $list = $row[$registry];
+                sort($list);
+                $sources[$key][$registry] = $list;
+            }
+        }
+
+        // Cornerstone first, the unattributed last, the rest by name.
+        uksort($sources, static function (string $a, string $b): int {
+            $rank = static fn (string $key): int => $key === self::CORNERSTONE ? 0 : ($key === self::UNKNOWN ? 2 : 1);
+
+            return [$rank($a), $a] <=> [$rank($b), $b];
+        });
+
+        return ['sources' => $sources, 'counts' => $counts, 'unreadable' => $unreadable];
+    }
+
+    /**
+     * The first source among an entry's callback files that says who
+     * registered it: Cornerstone when Cornerstone is among them (a plugin
+     * that adds to one of Cornerstone's own Dynamic Content groups does not
+     * make the group the plugin's), otherwise the first file that resolves.
+     *
+     * @param  array<int, string|null> $files In the order they should be tried.
+     * @param  array<string, mixed>    $roots
+     */
+    public static function ownerFile(array $files, array $roots, bool $preferCornerstone): ?string
+    {
+        $resolved = array_values(array_filter($files, static fn (mixed $file): bool => is_string($file) && $file !== ''));
+
+        if ($preferCornerstone) {
+            foreach ($resolved as $file) {
+                if (self::sourceOf($file, $roots) === self::CORNERSTONE) {
+                    return $file;
+                }
+            }
+        }
+
+        return $resolved[0] ?? null;
+    }
+
+    /**
+     * The file a callback's code lives in, found by reflection: a closure, a
+     * function name, "Class::method", [object or class, method] or an
+     * invokable object. Null when it is none of those or is built into PHP.
+     *
+     * @param string|null $skipScope Ignore closures created inside this class
+     *                               (Cornerstone's Definition wraps an element's
+     *                               controls in a builder closure of its own).
+     */
+    public static function callableFile(mixed $callable, ?string $skipScope = null): ?string
+    {
+        try {
+            if ($callable instanceof \Closure) {
+                $reflection = new \ReflectionFunction($callable);
+
+                if ($skipScope !== null && $reflection->getClosureScopeClass()?->getName() === ltrim($skipScope, '\\')) {
+                    return null;
+                }
+            } elseif (is_string($callable) && str_contains($callable, '::')) {
+                [$class, $method] = explode('::', $callable, 2);
+                $reflection = new \ReflectionMethod($class, $method);
+            } elseif (is_string($callable) && function_exists($callable)) {
+                $reflection = new \ReflectionFunction($callable);
+            } elseif (is_array($callable) && count($callable) === 2 && isset($callable[0], $callable[1]) && (is_object($callable[0]) || is_string($callable[0])) && is_string($callable[1])) {
+                $reflection = new \ReflectionMethod($callable[0], $callable[1]);
+            } elseif (is_object($callable) && method_exists($callable, '__invoke')) {
+                $reflection = new \ReflectionMethod($callable, '__invoke');
+            } else {
+                return null;
+            }
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $file = $reflection->getFileName();
+
+        return is_string($file) && $file !== '' ? $file : null;
+    }
+
+    /**
+     * The file a class is declared in, or null.
+     */
+    public static function classFile(mixed $class): ?string
+    {
+        if (! is_string($class) || $class === '') {
+            return null;
+        }
+
+        try {
+            if (! class_exists($class)) {
+                return null;
+            }
+
+            $file = (new \ReflectionClass($class))->getFileName();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return is_string($file) && $file !== '' ? $file : null;
+    }
+
+    /**
+     * ACF, free or Pro. The `ACF` class is in both, so it says only that ACF
+     * is active; Pro is the ACF_PRO constant or acf_get_setting('pro').
+     *
+     * @return array{active: bool, pro: bool, version: string|null}
+     */
+    public static function acf(bool $active, bool $proConstant, mixed $proSetting, ?string $version): array
+    {
         return [
-            'present' => $present,
-            'missing' => array_values(array_diff($expected, $present)),
+            'active'  => $active,
+            'pro'     => $active && ($proConstant || ! empty($proSetting)),
+            'version' => $active ? $version : null,
         ];
     }
 
     /**
-     * @param  mixed $value
-     * @return string[]
+     * @param  array<string, array<string, mixed>> $plugins
+     * @return array<string, mixed>
      */
-    private static function strings(mixed $value): array
+    private static function sourceRow(string $source, array $plugins): array
     {
-        if (! is_array($value)) {
-            return [];
-        }
+        $row = ['label' => $source === self::CORNERSTONE ? 'Cornerstone' : ($source === self::UNKNOWN ? 'Could not be attributed' : $source)];
 
-        return array_values(array_filter(array_map(static fn (mixed $v): string => is_scalar($v) ? (string) $v : '', $value), static fn (string $v): bool => $v !== ''));
-    }
+        if (str_starts_with($source, 'plugin:')) {
+            $folder = substr($source, strlen('plugin:'));
 
-    /**
-     * @param  mixed $value
-     * @return array<string, string>
-     */
-    private static function constants(mixed $value): array
-    {
-        if (! is_array($value)) {
-            return [];
-        }
-
-        $clean = [];
-
-        foreach ($value as $name => $constant) {
-            if (is_string($name) && is_scalar($constant)) {
-                $clean[$name] = (string) $constant;
+            foreach ($plugins as $file => $header) {
+                if (is_string($file) && str_starts_with($file, $folder . '/') && is_array($header)) {
+                    $row['label'] = is_string($header['Name'] ?? null) && $header['Name'] !== '' ? $header['Name'] : $source;
+                    $row['plugin'] = $file;
+                    $row['version'] = is_string($header['Version'] ?? null) && $header['Version'] !== '' ? $header['Version'] : null;
+                    break;
+                }
             }
         }
 
-        return $clean;
+        foreach (self::REGISTRIES as $registry) {
+            $row[$registry] = [];
+        }
+
+        return $row;
+    }
+
+    private static function path(string $path): string
+    {
+        $path = str_replace('\\', '/', $path);
+
+        return (string) preg_replace('#/+#', '/', $path);
+    }
+
+    private static function root(mixed $root): ?string
+    {
+        if (! is_string($root) || trim($root) === '') {
+            return null;
+        }
+
+        return rtrim(self::path($root), '/') . '/';
     }
 }

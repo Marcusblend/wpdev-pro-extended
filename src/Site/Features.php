@@ -87,11 +87,7 @@ final class Features
                 'active'  => self::woocommerceActive(),
                 'version' => defined('WC_VERSION') ? (string) constant('WC_VERSION') : null,
             ],
-            'acf'             => [
-                'active'  => class_exists('ACF'),
-                'pro'     => class_exists('acf_pro'),
-                'version' => defined('ACF_VERSION') ? (string) constant('ACF_VERSION') : null,
-            ],
+            'acf'             => self::acf(),
             'max'             => self::max(),
             'permissions'     => self::permissions(),
         ];
@@ -140,6 +136,32 @@ final class Features
             'entries_without_final_slash' => $noSlash,
             'global_endpoints'            => is_array($endpoints) ? count($endpoints) : 0,
         ];
+    }
+
+    /**
+     * ACF and whether it is Pro. Free ACF declares the same `ACF` class, so
+     * Pro is read from the ACF_PRO constant or acf_get_setting('pro').
+     *
+     * @return array{active: bool, pro: bool, version: string|null}
+     */
+    public static function acf(): array
+    {
+        $setting = null;
+
+        if (function_exists('acf_get_setting')) {
+            try {
+                $setting = acf_get_setting('pro');
+            } catch (\Throwable) {
+                $setting = null;
+            }
+        }
+
+        return Extensions::acf(
+            class_exists('ACF'),
+            defined('ACF_PRO') && (bool) constant('ACF_PRO'),
+            $setting,
+            defined('ACF_VERSION') ? (string) constant('ACF_VERSION') : null
+        );
     }
 
     /**
