@@ -29,3 +29,59 @@ T::same(null, WriteJournal::summarize([]), 'a result with nothing to report summ
 T::same(null, WriteJournal::summarize(['added' => []]), 'an empty list is not reported');
 T::same(null, WriteJournal::summarize(['operations_applied' => 0]), 'nor is a zero count');
 T::same(null, WriteJournal::summarize('text'), 'nor is a result that is not an object');
+
+// Dry runs, read from each tool's own flag -------------------------------------
+
+T::ok(WriteJournal::isDryRun('set_colors', ['dry_run' => true]), 'dry_run: true is a dry run');
+T::ok(WriteJournal::isDryRun('set_colors', ['dry_run' => 'true']), 'so is the string "true"');
+T::ok(! WriteJournal::isDryRun('set_colors', ['dry_run' => 'false']), 'the string "false" is not, though it is not empty');
+T::ok(! WriteJournal::isDryRun('set_colors', ['dry_run' => '0']), 'nor is "0"');
+T::ok(! WriteJournal::isDryRun('set_colors', []), 'a call without dry_run writes');
+T::ok(! WriteJournal::isDryRun('set_colors', ['dry_run' => 'yes']), 'a flag the tool would refuse is not taken as a preview');
+
+T::ok(WriteJournal::isDryRun('import_tco', []), 'import_tco without confirm is a preview');
+T::ok(WriteJournal::isDryRun('import_tco', ['confirm' => false]), 'as it is with confirm: false');
+T::ok(WriteJournal::isDryRun('restore_snapshot', ['confirm' => 'false']), 'or "false"');
+T::ok(! WriteJournal::isDryRun('restore_snapshot', ['confirm' => true]), 'confirm: true writes');
+T::ok(! WriteJournal::isDryRun('import_tco', ['confirm' => true, 'dry_run' => true]), 'and a confirm-style tool ignores a dry_run it does not take');
+T::ok(WriteJournal::isDryRun('get_platform_baseline', []), 'reading the baseline without save writes nothing');
+T::ok(! WriteJournal::isDryRun('get_platform_baseline', ['save' => true]), 'save: true does');
+
+// Entries -------------------------------------------------------------------------
+
+WpStub::reset();
+$journal = new WriteJournal();
+
+$journal->record('import_tco', ['confirm' => false], ['entries' => []]);
+T::ok($journal->read()[0]['dry_run'], 'a confirm: false preview is logged as a dry run');
+
+$journal->record('set_variables', ['dry_run' => 'false'], ['added' => ['brand']]);
+T::ok(! $journal->read()[0]['dry_run'], 'a dry_run: "false" write is logged as a write');
+
+$journal->recordFailure('update_layout', ['post_id' => 42], new RuntimeException('Writing the patched layout to post 42 failed.'));
+$failed = $journal->read()[0];
+T::ok($failed['failed'] ?? false, 'a thrown write is logged as failed');
+T::same('Writing the patched layout to post 42 failed.', $failed['error'] ?? null, 'with its error');
+T::same(['kind' => 'post_id', 'id' => 42], $failed['target'] ?? null, 'and what it was aimed at');
+T::ok(! $failed['dry_run'], 'and is not a dry run');
+T::ok(! isset($journal->read()[1]['failed']), 'a write that succeeded is not marked failed');
+
+T::same(503, strlen(WriteJournal::errorText(new RuntimeException(str_repeat('x', 900)))), 'a long message is cut to 500 bytes and an ellipsis');
+T::same('LogicException', WriteJournal::errorText(new LogicException('')), 'an empty message names the exception instead');
+
+// Through the server ---------------------------------------------------------------
+
+WpStub::reset();
+$server = new ProExtended\Mcp\Server(new ProExtended\Elements\SchemaExtractor(), new ProExtended\Layouts\LayoutService());
+
+$response = $server->handleRequest(['jsonrpc' => '2.0', 'id' => 1, 'method' => 'tools/call', 'params' => ['name' => 'set_api_allowlist', 'arguments' => []]]);
+T::ok($response['result']['isError'] ?? false, 'a write that throws is reported to the caller');
+$logged = $journal->read()[0] ?? [];
+T::same('set_api_allowlist', $logged['tool'] ?? null, 'and journalled');
+T::ok($logged['failed'] ?? false, 'as failed');
+T::same('Pass add, remove, or both.', $logged['error'] ?? null, 'with the error the caller saw');
+
+$server->handleRequest(['jsonrpc' => '2.0', 'id' => 2, 'method' => 'tools/call', 'params' => ['name' => 'list_colors', 'arguments' => ['unexpected' => true]]]);
+T::same('set_api_allowlist', $journal->read()[0]['tool'] ?? null, 'a read tool that throws is not journalled');
+
+WpStub::reset();

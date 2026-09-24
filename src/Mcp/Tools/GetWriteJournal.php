@@ -18,7 +18,7 @@ final class GetWriteJournal implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'What this plugin has changed on this site, newest first: the tool, who ran it, when, what it touched and a short summary of what changed. Dry runs are recorded too and can be filtered out. This answers "what happened on this site" for every write, where the settings backups only cover the few things they hold. The journal keeps the most recent entries and is read-only here.';
+        return 'What this plugin has changed on this site, newest first: the tool, who ran it, when, what it touched and a short summary of what changed. Dry runs are recorded too and can be filtered out, and a write that failed is marked failed and recorded with its error. This answers "what happened on this site" for every write, where the settings backups only cover the few things they hold. The journal keeps the most recent entries and is read-only here.';
     }
 
     public function inputSchema(): array
