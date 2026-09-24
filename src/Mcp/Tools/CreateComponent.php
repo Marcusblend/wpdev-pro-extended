@@ -30,7 +30,7 @@ final class CreateComponent implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Make a reusable component from a set of elements, or from part of an existing layout. exports names the settings a person editing an instance may change: each is a path into the elements ("0", "0._modules.1") with an id and a label, and those elements are marked so the builder shows them. slots are the paths where an instance can put its own content. parameters is a _p_json schema, so a component\'s values can be driven by named parameters rather than edited per instance. Pass elements, or from_document with an optional path to lift a subtree out of a page or document. Run with dry_run: true first.';
+        return 'Make a reusable component from a set of elements, or from part of an existing layout. exports names the settings a person editing an instance may change: each is a path into the elements ("0", "0._modules.1") with an id and a label, and those elements are marked so the builder shows them. slots are the paths where an instance can put its own content. parameters is a _p_json schema, so a component\'s values can be driven by named parameters rather than edited per instance. Pass elements, or from_document with an optional path to lift a subtree out of a page or document. After saving, every export is looked up in Cornerstone\'s component registry; if one is missing the new document is deleted and the call fails with the reason. Run with dry_run: true first.';
     }
 
     public function inputSchema(): array
@@ -176,6 +176,30 @@ final class CreateComponent implements ToolInterface, AnnotatedToolInterface
             'elements' => self::flatten($elements),
         ]);
 
+        $documentId = (int) ($created['id'] ?? 0);
+
+        // Saving is not the same as being offered in the library: a shape the
+        // registry does not recognise, or an export id another document
+        // already claims, saves without complaint and never appears. Rebuild
+        // the registry the builder reads and look for every export; anything
+        // missing means the document is removed again and the call fails.
+        $exportIds = array_values(array_map(
+            static fn (array $mark): string => $mark['id'],
+            array_filter($marked, static fn (array $mark): bool => $mark['kind'] === 'export')
+        ));
+        $registry = $this->gateway->componentRegistry(true);
+        $missing = self::unregisteredExports($exportIds, $documentId, (array) ($registry['components'] ?? []));
+
+        if ($missing !== []) {
+            if ($documentId > 0) {
+                wp_delete_post($documentId, true);
+            }
+
+            $this->gateway->componentRegistry(true);
+
+            throw new \RuntimeException(self::unregisteredMessage($documentId, $missing, (array) ($registry['errors'] ?? [])));
+        }
+
         return [
             'created'      => true,
             'document_id'  => $created['id'] ?? null,
@@ -185,7 +209,59 @@ final class CreateComponent implements ToolInterface, AnnotatedToolInterface
             'marked'       => $marked,
             'parameters'   => $declared,
             'validation'   => $validation,
+            'registered'   => ['source' => $registry['source'] ?? null, 'exports' => $exportIds],
         ];
+    }
+
+    /**
+     * The exports of a new component document that the registry does not
+     * list for that document: absent, or claimed by another document.
+     *
+     * @param  string[]                 $exportIds
+     * @param  array<int|string, mixed> $components The registry's components, keyed by _c_id.
+     * @return array<int, array{id: string, registered_to: int|null}>
+     */
+    public static function unregisteredExports(array $exportIds, int $documentId, array $components): array
+    {
+        $missing = [];
+
+        foreach ($exportIds as $id) {
+            $entry = $components[$id] ?? null;
+            $doc = is_array($entry) && is_numeric($entry['doc'] ?? null) ? (int) $entry['doc'] : null;
+
+            if ($documentId <= 0 || $doc !== $documentId) {
+                $missing[] = ['id' => (string) $id, 'registered_to' => $doc];
+            }
+        }
+
+        return $missing;
+    }
+
+    /**
+     * Why a component that saved was rolled back.
+     *
+     * @param array<int, array{id: string, registered_to: int|null}> $missing
+     * @param string[]                                              $registryErrors
+     */
+    public static function unregisteredMessage(int $documentId, array $missing, array $registryErrors): string
+    {
+        $ids = array_map(static fn (array $row): string => $row['registered_to'] === null
+            ? sprintf('"%s"', $row['id'])
+            : sprintf('"%s" (Cornerstone has it from document %d instead)', $row['id'], $row['registered_to']), $missing);
+
+        $message = sprintf(
+            'The component saved as document %d, but Cornerstone\'s component registry does not list %s for it, so it would never appear in the library. The document was deleted again; nothing was left behind.',
+            $documentId,
+            implode(', ', $ids)
+        );
+
+        $errors = array_values(array_filter(array_map('strval', $registryErrors)));
+
+        if ($errors !== []) {
+            $message .= ' The registry reports: ' . implode(' ', $errors);
+        }
+
+        return $message . ' Check the elements with validate_layout and the export ids against list_components.';
     }
 
     /**
