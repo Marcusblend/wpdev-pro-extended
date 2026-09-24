@@ -107,3 +107,73 @@ T::ok(! isset($unstamped['data'][0]['_m']), 'with stamp_new off nothing is stamp
 $added = $tool->patch($legacy, [['op' => 'add', 'path' => '1', 'value' => ['_type' => 'layout-div']]], false, new ProExtended\Elements\ElementStamper(['layout-div' => 1], '4_4'));
 T::same(['e' => 1], $added['data'][1]['_m'] ?? null, 'an added element is stamped the same way');
 T::same('4_4', $added['data'][1]['_bp_base'] ?? null, 'with both markers');
+
+// preset: only the keys the element designates as style ---------------------
+
+$designations = [
+    'text_content'         => 'markup:html',
+    'text_tag'             => 'markup',
+    'text_font_size'       => 'style',
+    'text_text_color'      => 'style:color',
+    'text_font_family'     => 'style:font-family',
+    'text_bg_color'        => 'style:color',
+    'looper_provider'      => 'markup:bool',
+];
+
+$element = [
+    '_type'           => 'text',
+    '_id'             => 'e7',
+    '_label'          => 'Intro',
+    '_m'              => ['e' => 1],
+    '_bp_base'        => '4_4',
+    '_bp_data4_4'     => ['text_bg_color' => ['#fff', null, null, null, '#eee']],
+    '_c_id'           => 'intro',
+    '_c_export'       => true,
+    'text_content'    => 'Welcome to the site',
+    'text_tag'        => 'p',
+    'text_font_size'  => '1em',
+    'text_bg_color'   => 'transparent',
+];
+
+$atts = [
+    '_type'           => 'text',
+    '_id'             => 'p1',
+    '_label'          => 'Preset label',
+    '_m'              => ['e' => 0],
+    '_bp_base'        => '4_4',
+    '_bp_data4_4'     => ['text_font_size' => ['2em', null, null, null, '3em'], 'text_content' => ['x', null, null, null, 'y']],
+    '_c_id'           => 'preset',
+    '_modules'        => [['_type' => 'text']],
+    '_region'         => 'content',
+    '_parent'         => 'e1',
+    'text_content'    => 'Lorem ipsum',
+    'text_tag'        => 'h2',
+    'text_font_size'  => '2em',
+    'text_text_color' => 'global-color:brand',
+    'looper_provider' => true,
+    'not_a_key'       => 'x',
+];
+
+$styled = UpdateLayout::mergePreset($element, $atts, $designations);
+T::same('2em', $styled['text_font_size'], 'a style key the preset sets is taken');
+T::same('global-color:brand', $styled['text_text_color'], 'including one the element did not have');
+T::same('transparent', $styled['text_bg_color'], 'a style key the preset does not set is kept');
+T::same('Welcome to the site', $styled['text_content'], 'the element keeps its text');
+T::same('p', $styled['text_tag'], 'and its other markup settings');
+T::same('Intro', $styled['_label'], 'its label');
+T::same('e7', $styled['_id'], 'its id');
+T::same(['e' => 1], $styled['_m'], 'its migration marker');
+T::same('intro', $styled['_c_id'], 'its component id');
+T::ok($styled['_c_export'], 'and its export marker');
+T::ok(! isset($styled['_modules']) && ! isset($styled['_region']) && ! isset($styled['_parent']), 'no children, region or parent come from the preset');
+T::ok(! isset($styled['looper_provider']), 'a markup setting the preset carries is not taken');
+T::ok(! isset($styled['not_a_key']), 'nor is a key the element does not designate');
+T::same(['#fff', null, null, null, '#eee'], $styled['_bp_data4_4']['text_bg_color'], 'responsive values the preset does not set are kept');
+T::same(['2em', null, null, null, '3em'], $styled['_bp_data4_4']['text_font_size'], 'responsive style values it sets are taken');
+T::ok(! isset($styled['_bp_data4_4']['text_content']), 'responsive content values are not');
+
+T::throws(static fn () => UpdateLayout::mergePreset($element, ['_label' => 'x', 'text_content' => 'y'], $designations), 'a preset with no style settings is refused', 'no style settings');
+T::throws(static fn () => UpdateLayout::mergePreset($element, ['_bp_data3_3' => ['text_font_size' => ['1em']]], $designations), 'responsive values for other breakpoints are refused', 'breakpoints "3_3"');
+
+// Without Cornerstone the designations cannot be read, and nothing is guessed.
+T::same([], (new ProExtended\Cornerstone\ElementContext(new SchemaExtractor()))->designations('text'), 'designations are empty when the registry cannot be read');

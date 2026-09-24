@@ -35,7 +35,7 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset keeps the element\'s content, id and children and takes its styling keys, and is refused when it is for a different element type. The editing operations: move takes "to", a path read in the tree as it is now: the element lands there and the one there moves down; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name", already configured (call list_prefabs with them first: a write takes the values that read cached). Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
+        return 'Apply patch operations to an existing Cornerstone layout. Operations are {"op": ..., "path": "0._modules.1", ...}: update merges value into the element at the path, add inserts one, remove deletes one, and preset applies a saved preset\'s settings to the element there ({"op": "preset", "path": "0._modules.1", "preset": 122} — an ID or the preset\'s exact title, from list_templates with kind: "preset"). A preset changes only the keys the element\'s definition designates as style, so its content, label, ids and children stay its own, and it is refused when it is for a different element type. The editing operations: move takes "to", a path read in the tree as it is now: the element lands there and the one there moves down; duplicate copies an element in beside itself, without its ids; wrap puts it inside the element in "value"; unwrap removes it and leaves its children where it was; and prefab inserts one of Cornerstone\'s prefab elements by "group" and "name", already configured (call list_prefabs with them first: a write takes the values that read cached). Operations are all-or-nothing: if any one fails, nothing is written. The result is validated before saving, and a backup is created first.';
     }
 
     public function inputSchema(): array
@@ -398,10 +398,71 @@ final class UpdateLayout implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException(sprintf('That preset is for a "%s"; the element at "%s" is a "%s".', $forType, $path, $targetType));
         }
 
-        // The element's own identity and children are never part of a preset.
-        unset($atts['_id'], $atts['_modules'], $atts['_region'], $atts['_parent'], $atts['_c_id']);
+        $type = $targetType !== '' ? $targetType : $forType;
+        $designations = $this->elements?->designations($type) ?? [];
 
-        $target = array_merge($target, $atts);
+        if ($designations === []) {
+            throw new \RuntimeException(sprintf('The "%s" element\'s designations could not be read from Cornerstone\'s registry, so its style settings cannot be told from its content. Nothing was applied.', $type));
+        }
+
+        $target = self::mergePreset($target, $atts, $designations);
+    }
+
+    /**
+     * Apply a preset's settings to an element: its style settings only.
+     *
+     * A preset restyles an element; it does not rewrite it. Only keys the
+     * element's definition designates as style are taken, so its content,
+     * label, markers, component ids and children stay its own. Responsive
+     * values (`_bp_data<tag>`) are filtered the same way and merged key by
+     * key into the element's own, so a responsive value the preset does not
+     * set is kept.
+     *
+     * @param  array<string, mixed>  $element
+     * @param  array<string, mixed>  $atts         The preset's stored settings.
+     * @param  array<string, string> $designations Key => designation, from the element's definition.
+     * @return array<string, mixed>
+     */
+    public static function mergePreset(array $element, array $atts, array $designations): array
+    {
+        $isStyle = static fn (mixed $key): bool => is_string($key)
+            && is_string($designations[$key] ?? null)
+            && str_starts_with($designations[$key], 'style');
+
+        $style = [];
+
+        foreach ($atts as $key => $value) {
+            if (is_string($key) && preg_match('/^_bp_data(\d+_\d+)$/', $key, $match) === 1) {
+                if (! is_array($value)) {
+                    continue;
+                }
+
+                $responsive = array_filter($value, $isStyle, ARRAY_FILTER_USE_KEY);
+
+                if ($responsive === []) {
+                    continue;
+                }
+
+                $base = $element['_bp_base'] ?? null;
+
+                if (is_string($base) && $base !== '' && $base !== $match[1]) {
+                    throw new \InvalidArgumentException(sprintf('That preset\'s responsive values were written for breakpoints "%s" and the element is on "%s", so Cornerstone would ignore them.', $match[1], $base));
+                }
+
+                $style[$key] = array_merge(is_array($element[$key] ?? null) ? $element[$key] : [], $responsive);
+                continue;
+            }
+
+            if ($isStyle($key)) {
+                $style[$key] = $value;
+            }
+        }
+
+        if ($style === []) {
+            throw new \InvalidArgumentException('That preset holds no style settings for this element.');
+        }
+
+        return array_merge($element, $style);
     }
 
     /**

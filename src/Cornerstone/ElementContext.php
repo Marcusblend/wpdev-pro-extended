@@ -137,6 +137,19 @@ final class ElementContext
     }
 
     /**
+     * What each of an element type's keys is, as its definition declares it:
+     * "style", "style:color", "markup", "markup:html" and so on. Read from the
+     * element's registered values, not its controls, so it needs no builder
+     * context. Empty when the registry cannot be read.
+     *
+     * @return array<string, string>
+     */
+    public function designations(string $type): array
+    {
+        return $this->schema->getDesignations($type);
+    }
+
+    /**
      * What ElementLint checks element data against on this site.
      */
     public function lintContext(): LintContext
