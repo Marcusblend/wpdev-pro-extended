@@ -788,6 +788,43 @@ final class DocumentGateway
     }
 
     /**
+     * Insert a new post whose post_content is copied as-is (translations).
+     *
+     * The same path as writeRaw(): WordPress unslashes whatever it is given,
+     * so the content is slashed once here, and the insert runs inside the
+     * JSON-content guard. Without the slash a stored `\"` or `\n` in a
+     * header's JSON loses its backslash and the copy no longer decodes.
+     *
+     * @param  array<string, mixed> $fields Other post fields, already slashed.
+     *
+     * @throws \RuntimeException
+     */
+    public function insertRaw(string $content, array $fields): int
+    {
+        $postarr = self::rawPostarr($content, $fields);
+
+        $id = $this->withJsonContentGuard(static fn() => wp_insert_post($postarr, true));
+
+        if (is_wp_error($id) || ! is_int($id) || $id === 0) {
+            throw new \RuntimeException('Failed to create the post: ' . (is_wp_error($id) ? $id->get_error_message() : 'unknown error'));
+        }
+
+        return $id;
+    }
+
+    /**
+     * The post array insertRaw() hands to WordPress: the fields as given, with
+     * post_content slashed.
+     *
+     * @param  array<string, mixed> $fields Already slashed.
+     * @return array<string, mixed>
+     */
+    public static function rawPostarr(string $content, array $fields): array
+    {
+        return array_merge($fields, ['post_content' => wp_slash($content)]);
+    }
+
+    /**
      * Run the side effects of a document save after its post_content was
      * written directly (restores, legacy blocks): fire Cornerstone's save
      * hooks for the reloaded document when possible, otherwise clear its
