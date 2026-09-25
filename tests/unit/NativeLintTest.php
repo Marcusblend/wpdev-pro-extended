@@ -150,7 +150,7 @@ $quiet = [
     [$element(['text_content' => '<p>One</p><p>Two <strong>bold</strong></p>'] + $inherit), 'plain paragraphs'],
     [$element(['text_content' => '<div>Styled</div>', 'text_font_size' => '1.25rem', 'text_text_color' => 'inherit']), 'a text with its own font size'],
     [$element(['text_content' => '<ul><li>A</li></ul>']), 'a list in a text at its defaults (size 1em, colour set)'],
-    [$element(['text_content' => '<h2>Title</h2>', 'text_font_family' => 'global-ff:body'] + $inherit), 'a font reference is not inherit'],
+    [$element(['text_content' => '<h2>Title</h2>', 'text_font_family' => 'body'] + $inherit), 'a font reference is not inherit'],
     [$element(['text_content' => '<div class="x">Hi</div>'] + $inherit, 'headline'), 'a Headline keeps its 1.4 line height unless it is set to inherit'],
     [$element(['text_content' => '<div class="x">Hi</div>'] + $inherit, 'layout-div'), 'other element types'],
 ];

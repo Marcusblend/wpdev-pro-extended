@@ -177,7 +177,7 @@ $seen['literal-color'] = true;
 $stack = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => '"Barlow Condensed", sans-serif'];
 $issues = $withKeys->tree([$stack]);
 T::same(['literal-font-family'], $codesOf($issues), 'literal-font-family: a stack in a font setting');
-T::ok(str_contains($issues[0]['message'], 'global-ff:'), 'the message names the reference form');
+T::ok(str_contains($issues[0]['message'], '_id on its own') && ! str_contains($issues[0]['message'], 'global-ff:'), 'the message names the bare _id form, not global-ff:', $issues[0]['message']);
 $seen['literal-font-family'] = true;
 
 $rgba = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_bg_color' => 'rgba(0, 0, 0, 0.4)'];
@@ -187,9 +187,114 @@ $referenced = [
     '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',
     'text_text_color'  => 'global-color:brand',
     'text_bg_color'    => 'global-color:surface:0.5',
-    'text_font_family' => 'global-ff:heading',
+    'text_font_family' => 'system:helveticaneue',
+    'text_font_weight' => 'fw-bold',
 ];
 T::same([], $codesOf($withKeys->tree([$referenced])), 'a reference is what the lint is asking for');
+
+// With the site's font ids, a bare _id is a reference; without them it reads
+// like a single named font.
+$withFonts = new ElementLint(new LintContext(
+    styleKeys: static fn (string $type): array => ['text_font_family' => 'font-family', 'text_font_weight' => 'font-weight'],
+    fontIds: static fn (): array => ['heading', 'body'],
+));
+$bareId = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'heading', 'text_font_weight' => 'fw-normal', 'text_font_family_alt' => 'body'];
+T::same([], $codesOf($withFonts->tree([$bareId])), 'a font\'s bare _id is the reference, not a literal');
+$issues = $withFonts->tree([['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'Georgia']]);
+T::same(['literal-font-family'], $codesOf($issues), 'a family that is not one of the site\'s ids is still a literal');
+T::ok(str_contains($issues[0]['message'], '"heading"'), 'and the message offers one of the site\'s ids', $issues[0]['message']);
+
+$asked = 0;
+$counted = new ElementLint(new LintContext(
+    styleKeys: static fn (string $type): array => ['text_font_family' => 'font-family'],
+    fontIds: static function () use (&$asked): array {
+        $asked++;
+
+        return ['heading'];
+    },
+));
+$counted->tree([
+    ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'Georgia'],
+    ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'Verdana'],
+]);
+T::same(1, $asked, 'the font ids are read once per lint');
+
+$unreadable = new ElementLint(new LintContext(
+    styleKeys: static fn (string $type): array => ['text_font_family' => 'font-family'],
+    fontIds: static fn (): ?array => null,
+));
+T::same(['literal-font-family'], $codesOf($unreadable->tree([['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'Georgia']])), 'an unreadable font list leaves the literal check as it was');
+
+// font-ref-prefix and font-weight-shape need no surface: font keys are named
+// *_font_family and *_font_weight.
+$prefixed = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => 'global-ff:heading', 'text_font_weight' => 'global-fw:heading|fw-bold'];
+$issues = $lint->tree([$prefixed]);
+T::same(['font-ref-prefix', 'font-ref-prefix'], array_column($issues, 'code'), 'font-ref-prefix: a global-ff: family and a global-fw: weight');
+T::ok(str_contains($issues[0]['message'], 'Write the font\'s _id on its own: "heading"'), 'the family message gives the exact fix', $issues[0]['message']);
+T::ok(str_contains($issues[1]['message'], 'Write the weight on its own: "fw-bold"') && str_contains($issues[1]['message'], 'inherit'), 'the weight message gives the exact fix and the symptom', $issues[1]['message']);
+$seen['font-ref-prefix'] = true;
+
+$piped = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_weight' => 'heading|fw-normal'];
+$issues = $lint->tree([$piped]);
+T::same(['font-weight-shape'], $codesOf($issues), 'font-weight-shape: a weight with the family joined to it');
+T::ok(str_contains($issues[0]['message'], 'Write the weight on its own: "fw-normal"') && str_contains($issues[0]['message'], 'inherit'), 'the message gives the fix and says it renders inherit', $issues[0]['message']);
+$seen['font-weight-shape'] = true;
+
+$everywhere = [
+    '_type' => 'button', '_m' => ['e' => 1], '_bp_base' => '4_4',
+    'anchor_text_primary_font_family_alt' => 'global-ff:body',
+    'anchor_text_primary_font_weight_alt' => 'body|fw-bold',
+    '_bp_data4_4' => [
+        'anchor_text_primary_font_family' => [null, 'global-ff:body', null, null, null],
+        'anchor_text_primary_font_weight' => [null, null, 'global-fw:body|fw-normal', 'body|fw-bold', null],
+    ],
+];
+$issues = $lint->tree([$everywhere]);
+T::same(['font-ref-prefix', 'font-weight-shape', 'font-ref-prefix', 'font-ref-prefix', 'font-weight-shape'], array_column($issues, 'code'), '_alt twins and per-breakpoint values are checked too');
+T::same(['anchor_text_primary_font_family_alt', 'anchor_text_primary_font_weight_alt', '_bp_data4_4.anchor_text_primary_font_family[1]', '_bp_data4_4.anchor_text_primary_font_weight[2]', '_bp_data4_4.anchor_text_primary_font_weight[3]'], array_map(static fn (array $issue): string => explode(' ', $issue['message'])[0], $issues), 'and named by key and slot');
+
+$fine = [
+    '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',
+    'text_font_family' => 'heading', 'text_font_weight' => 'fw-bold',
+    'text_font_weight_alt' => '700',
+    '_bp_data4_4' => ['text_font_weight' => [null, 'inherit', 'var(--w)', '{{dc:p:weight}}', null]],
+    '_p_data' => ['font' => 'global-ff:heading', 'weight' => 'global-fw:heading|fw-bold'],
+    'text_content' => 'global-ff:heading is how 1.5.0 told clients to write it',
+];
+T::same([], $codesOf($lint->tree([$fine])), 'right forms, variables, tokens, parameters and copy are left alone');
+
+// Every value the Cornerstone fixture lists: the ones that render as meant
+// pass, and the others are flagged with the fixture's fix.
+$fixtureRows = array_filter(file(dirname(__DIR__) . '/fixtures/cornerstone-7.9.4/font-values.txt', FILE_IGNORE_NEW_LINES) ?: [], static fn (string $line): bool => $line !== '' && $line[0] !== '#');
+
+foreach ($fixtureRows as $row) {
+    [$kind, $value, , $fix] = explode("\t", $row);
+    $key = $kind === 'family' ? 'text_font_family' : 'text_font_weight';
+    $issues = $withFonts->tree([['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', $key => str_replace('body', 'heading', $value)]]);
+
+    if ($fix === '-') {
+        T::same([], $codesOf($issues), "{$kind} \"{$value}\" renders as meant and is not flagged");
+    } else {
+        $fixed = str_replace('body', 'heading', $fix);
+        T::ok(count($issues) === 1 && in_array($issues[0]['code'], ['font-ref-prefix', 'font-weight-shape'], true) && str_contains($issues[0]['message'], '"' . $fixed . '"'), "{$kind} \"{$value}\" is flagged with the fix \"{$fixed}\"", (string) json_encode($issues));
+    }
+}
+
+// Every font key Cornerstone designates is found by its name.
+foreach (file(dirname(__DIR__) . '/fixtures/cornerstone-7.9.4/font-keys.txt', FILE_IGNORE_NEW_LINES) ?: [] as $row) {
+    if ($row === '' || $row[0] === '#') {
+        continue;
+    }
+
+    [$key, $property] = explode("\t", $row);
+    $codes = $codesOf($lint->tree([['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', $key => 'global-ff:heading']]));
+
+    if ($codes !== ['font-ref-prefix']) {
+        T::ok(false, "{$key} ({$property}) is checked by name", (string) json_encode($codes));
+    }
+}
+
+T::ok(true, 'every font key in the fixture is checked by name');
 
 $keywords = [
     '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',

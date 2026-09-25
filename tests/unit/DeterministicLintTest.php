@@ -166,4 +166,4 @@ foreach (['sans-serif', 'serif', 'monospace', 'system-ui', 'inherit', '"sans-ser
 
 T::same(['literal-font-family'], $codes(['text_font_family' => 'Helvetica, sans-serif']), 'a named font with a generic fallback still is');
 T::same(['literal-font-family'], $codes(['text_font_family' => 'Georgia']), 'and so is a single named font');
-T::same([], $codes(['text_font_family' => 'global-ff:body, sans-serif']), 'a global font with a fallback is a reference');
+T::same(['font-ref-prefix'], $codes(['text_font_family' => 'global-ff:body, sans-serif']), 'a global-ff: value is the wrong reference form, not a literal stack');

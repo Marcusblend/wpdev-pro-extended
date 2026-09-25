@@ -27,6 +27,9 @@ final class LintContext
      * @param (\Closure(string): ?array{origin: string, file: string})|null $shortcodeSource
      *                                                              Where a shortcode tag is defined (ShortcodeOrigin), or null
      *                                                              when the tag is not registered. Null when unknown.
+     * @param (\Closure(): ?array<int, string>)|null $fontIds       The Font Manager's font `_id`s (cornerstone_font_items),
+     *                                                              read when a lint first needs them; the closure returns null
+     *                                                              when the list cannot be read. Null when unknown.
      */
     public function __construct(
         public readonly array $migrationVersions = [],
@@ -40,5 +43,6 @@ final class LintContext
         public readonly ?bool $twigEnabled = null,
         public readonly ?\Closure $twigParser = null,
         public readonly ?\Closure $shortcodeSource = null,
+        public readonly ?\Closure $fontIds = null,
     ) {}
 }

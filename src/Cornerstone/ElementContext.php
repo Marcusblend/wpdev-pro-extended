@@ -9,7 +9,9 @@ use ProExtended\Elements\ElementStamper;
 use ProExtended\Elements\LintContext;
 use ProExtended\Elements\SchemaExtractor;
 use ProExtended\Elements\ShortcodeOrigin;
+use ProExtended\Settings\FontReferences;
 use ProExtended\Site\Features;
+use ProExtended\Support\Json;
 
 /**
  * What this site's Cornerstone says about elements: each type's migration
@@ -166,7 +168,31 @@ final class ElementContext
             $this->styleKeyReader(),
             ...$this->twigLintContext(),
             shortcodeSource: $this->shortcodeSource(),
+            fontIds: self::fontIdReader(),
         );
+    }
+
+    /**
+     * The Font Manager's font ids, for the font lints: a value equal to one
+     * is a reference, not a literal stack.
+     *
+     * Read from cornerstone_font_items when a lint asks (the way list_fonts
+     * reads it), not when the context is built, so a font set_fonts adds
+     * earlier in the request counts. Null when the option cannot be read.
+     *
+     * @return \Closure(): ?array<int, string>
+     */
+    private static function fontIdReader(): \Closure
+    {
+        return static function (): ?array {
+            try {
+                $items = Json::decodeStored(get_option('cornerstone_font_items', '[]'));
+            } catch (\Throwable) {
+                return null;
+            }
+
+            return $items === null ? null : FontReferences::ids($items);
+        };
     }
 
     /**

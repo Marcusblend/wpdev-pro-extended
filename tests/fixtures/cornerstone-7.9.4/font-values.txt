@@ -1,0 +1,17 @@
+# What a stored font value renders as in Cornerstone 7.9.4: includes/classes/Services/GlobalFonts.php (locate_font, resolveFontDefinition, getDataForFontItem, cssPostProcessFontFamily, cssPostProcessFontWeight, migrateLegacyFontWeight) and includes/classes/Tss/Functions/GlobalFontFamily.php, GlobalFontWeight.php. "body" stands for a Font Manager item _id. Tab-separated: kind, stored value, what renders, the value to write instead ("-" when the stored value is right).
+family	body	the font item's resolved stack	-
+family	system:helveticaneue	Cornerstone's own font data for that source and name	-
+family	inherit	inherit (GlobalFontFamily returns it untouched)	-
+family	var(--brand-font)	the variable (GlobalFontFamily returns it untouched)	-
+family	global-ff:body	the fallback font Helvetica, Arial, sans-serif (locate_font splits it into source "global-ff" and name "body")	body
+family	global-ff:body, sans-serif	the fallback font Helvetica, Arial, sans-serif	body
+family	global-fw:body|fw-normal	the fallback font Helvetica, Arial, sans-serif	body
+weight	fw-normal	the font item's weightNormal	-
+weight	fw-bold	the font item's weightBold, or bolder when it equals weightNormal	-
+weight	700	the closest weight the font defines	-
+weight	inherit	inherit (GlobalFontWeight returns it untouched)	-
+weight	var(--brand-weight)	the variable (GlobalFontWeight returns it untouched)	-
+weight	body|fw-normal	inherit: GlobalFontWeight joins the family first, and "<family>|body|fw-normal" has three parts	fw-normal
+weight	body|fw-bold	inherit	fw-bold
+weight	global-fw:body|fw-bold	inherit: migrateLegacyFontWeight keeps "body|fw-bold", which is joined as above	fw-bold
+weight	global-fw:body|fw-normal	inherit	fw-normal

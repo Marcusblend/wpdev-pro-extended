@@ -48,7 +48,9 @@ final class ElementLint
         'background-layers-off'     => 'Background layers are set but the element\'s advanced background switch is off, so they do not render.',
         'css-over-control'          => 'A css declaration sets a property the element already has a setting for; the setting is editable in the builder and can be bound to a parameter or global variable, a css block cannot.',
         'literal-color'             => 'A colour setting holds a literal value rather than a palette reference, so it keeps a copy of the colour and stops following the palette.',
-        'literal-font-family'       => 'A font family setting holds a literal stack rather than a global font reference, so it stops following the site\'s fonts.',
+        'literal-font-family'       => 'A font family setting holds a literal stack rather than a global font\'s _id, so it stops following the site\'s fonts.',
+        'font-ref-prefix'           => 'A font family or weight setting starts with "global-ff:" or "global-fw:". Cornerstone reads the family as a font source named "global-ff" and renders its fallback stack, and the weight as inherit; the family is the font\'s bare _id and the weight "fw-normal" or "fw-bold".',
+        'font-weight-shape'         => 'A font weight setting holds a "|". Cornerstone joins the element\'s family to the weight itself, so "body|fw-normal" becomes three parts and renders as inherit; the weight is "fw-normal" or "fw-bold" on its own.',
     ] + self::NATIVE_CODES;
 
     /**
@@ -144,6 +146,11 @@ final class ElementLint
 
     /** Keys that never hold tokens. */
     private const NO_TOKEN_KEYS = ['_type', '_id', '_region', '_c_id', '_bp_base', '_parent'];
+
+    /** The site's font ids, read once per lint from the context (null: unknown). */
+    private ?array $fontIdList = null;
+
+    private bool $fontIdsRead = false;
 
     public function __construct(
         private readonly LintContext $context,
@@ -301,6 +308,7 @@ final class ElementLint
         $this->checkLayers($element, $type, $add);
         $this->checkCss($element, $type, $add);
         $this->checkLiteralValues($element, $type, $add);
+        $this->checkFontReferences($element, $type, $add);
         $this->checkTwig($element, $add);
         $this->checkNative($element, $type, $add);
     }
@@ -995,12 +1003,170 @@ final class ElementLint
         }
 
         if ($property === 'font-family' && ! in_array(strtolower(trim($value, '"\' ')), self::GENERIC_FAMILIES, true)) {
+            // A global font's bare _id is exactly the reference this lint asks
+            // for, and "<source>:<name>" is Cornerstone's own font data.
+            if (in_array($value, $this->fontIds() ?? [], true) || \ProExtended\Settings\FontReferences::isSourceName($value)) {
+                return;
+            }
+
             $add('literal-font-family', sprintf(
-                '%s is the literal font stack %s. "global-ff:<id>" follows the site\'s fonts instead. list_fonts has the ids.',
+                '%s is the literal font stack %s. Set it to a global font\'s _id on its own (for example "%s"), which follows the site\'s fonts. get_native_reference section "fonts" (or list_fonts) has the ids.',
                 $label,
-                strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value
+                strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value,
+                $this->fontIds()[0] ?? 'body'
             ));
         }
+    }
+
+    // ─── Font reference shape (1.5.1) ────────────────────────────────────────
+
+    /**
+     * Font family and weight values in a form Cornerstone does not resolve.
+     *
+     * A family is a global font's bare _id ("body"); "global-ff:body" is read
+     * as a font source named "global-ff" and renders the fallback stack. A
+     * weight is "fw-normal" or "fw-bold": Cornerstone adds the family itself,
+     * so "body|fw-normal" (or "global-fw:body|fw-normal") renders as inherit.
+     * See Settings\FontReferences.
+     *
+     * Font keys are found by what the element's surface says they set when a
+     * surface is stored, and otherwise by name: every key Cornerstone 7.9.4
+     * designates style:font-family or style:font-weight ends in _font_family
+     * or _font_weight (tests/fixtures/cornerstone-7.9.4/font-keys.txt), so
+     * this check does not wait for a surface. Each key is checked as stored,
+     * as its _alt twin and per breakpoint in _bp_data, like the literal lints.
+     *
+     * _p_data is left alone: a parameter's value goes through Dynamic
+     * Content's postProcessValue(), which resolves "global-ff:" and
+     * "global-fw:" itself, so both forms work there.
+     *
+     * @param array<string, mixed> $element
+     */
+    private function checkFontReferences(array $element, string $type, \Closure $add): void
+    {
+        $keys = $this->context->styleKeys !== null ? ($this->context->styleKeys)($type) : [];
+        $keys = is_array($keys) ? $keys : [];
+
+        foreach ($element as $key => $value) {
+            if (! is_string($key)) {
+                continue;
+            }
+
+            if (preg_match('/^_bp_data\d+_\d+$/', $key) && is_array($value)) {
+                foreach ($value as $bpKey => $values) {
+                    $kind = self::fontKind((string) $bpKey, $keys);
+
+                    if ($kind === null || ! is_array($values)) {
+                        continue;
+                    }
+
+                    foreach ($values as $slot => $slotValue) {
+                        $this->checkFontValue($slotValue, sprintf('%s.%s[%s]', $key, (string) $bpKey, (string) $slot), $kind, $add);
+                    }
+                }
+
+                continue;
+            }
+
+            $kind = self::fontKind($key, $keys);
+
+            if ($kind !== null) {
+                $this->checkFontValue($value, $key, $kind, $add);
+            }
+        }
+    }
+
+    /**
+     * "family", "weight" or null for an element key (an _alt twin counts as
+     * its base key).
+     *
+     * @param array<string, mixed> $keys Element key => CSS property, from the surface.
+     */
+    private static function fontKind(string $key, array $keys): ?string
+    {
+        $base = str_ends_with($key, '_alt') ? substr($key, 0, -4) : $key;
+        $property = $keys[$key] ?? $keys[$base] ?? null;
+
+        if ($property === 'font-family' || str_ends_with($base, '_font_family')) {
+            return 'family';
+        }
+
+        if ($property === 'font-weight' || str_ends_with($base, '_font_weight')) {
+            return 'weight';
+        }
+
+        return null;
+    }
+
+    private function checkFontValue(mixed $value, string $label, string $kind, \Closure $add): void
+    {
+        if (! is_string($value)) {
+            return;
+        }
+
+        $value = trim($value);
+
+        // A variable or a token resolves to something else before Cornerstone reads it.
+        if ($value === '' || stripos($value, 'var(') !== false || str_contains($value, '{{')) {
+            return;
+        }
+
+        $shown = strlen($value) > 60 ? substr($value, 0, 59) . '…' : $value;
+
+        if (\ProExtended\Settings\FontReferences::hasPrefix($value)) {
+            if ($kind === 'family') {
+                $fix = \ProExtended\Settings\FontReferences::familyFix($value);
+                $add('font-ref-prefix', sprintf(
+                    '%s is "%s". Cornerstone reads "global-ff:" as a font source and renders the fallback stack (Helvetica, Arial, sans-serif). Write the font\'s _id on its own: %s.',
+                    $label,
+                    $shown,
+                    $fix !== null ? '"' . $fix . '"' : 'the _id from get_native_reference section "fonts"'
+                ));
+            } else {
+                $fix = \ProExtended\Settings\FontReferences::weightFix($value);
+                $add('font-ref-prefix', sprintf(
+                    '%s is "%s", which renders as font-weight: inherit, because Cornerstone adds the element\'s family itself. Write the weight on its own: %s.',
+                    $label,
+                    $shown,
+                    $fix !== null ? '"' . $fix . '"' : '"fw-normal" or "fw-bold"'
+                ));
+            }
+
+            return;
+        }
+
+        if ($kind === 'weight' && str_contains($value, '|')) {
+            $fix = \ProExtended\Settings\FontReferences::weightFix($value);
+            $add('font-weight-shape', sprintf(
+                '%s is "%s". Cornerstone joins the element\'s family to the weight itself ("<family>|%s"), which it cannot read, so this renders as font-weight: inherit. Write the weight on its own: %s.',
+                $label,
+                $shown,
+                $shown,
+                $fix !== null ? '"' . $fix . '"' : '"fw-normal" or "fw-bold"'
+            ));
+        }
+    }
+
+    /**
+     * The site's font ids, read from the context once per lint.
+     *
+     * @return string[]|null
+     */
+    private function fontIds(): ?array
+    {
+        if (! $this->fontIdsRead) {
+            $this->fontIdsRead = true;
+
+            try {
+                $ids = $this->context->fontIds !== null ? ($this->context->fontIds)() : null;
+            } catch (\Throwable) {
+                $ids = null;
+            }
+
+            $this->fontIdList = is_array($ids) ? array_values(array_filter($ids, 'is_string')) : null;
+        }
+
+        return $this->fontIdList;
     }
 
     /**
