@@ -8,10 +8,12 @@ use ProExtended\Cornerstone\DocumentAssets;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Cornerstone\Permissions;
 use ProExtended\Mcp\ToolPermissionException;
+use ProExtended\Settings\FontReferences;
 use ProExtended\Settings\SettingsBackups;
 use ProExtended\Settings\ThemeOptionsReader;
 use ProExtended\Settings\ThemeOptionsWriter;
 use ProExtended\Support\Args;
+use ProExtended\Support\Json;
 use ProExtended\Support\JsonArgs;
 
 final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
@@ -29,7 +31,7 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Write Theme Options. options is a map of key => value; get_theme_options lists the keys, their labels, current values and defaults. Each key is saved the way the Theme Options panel saves it (the before and after save actions fire, then the generated styles are purged), and every key is backed up first so restore_settings can put it back. A key this site does not register is refused, as are the keys another tool owns — Global CSS and JS, the palette, fonts — and the breakpoint and stack keys, which would reinterpret stored element data. Responsive variants ("<key>_bp_data4_4") are allowed alongside their key. Twig is switched on here: {"cs_twig_enabled": true}, with its sub-toggles (cs_twig_extension_wordpress, cs_twig_extension_html_extra, cs_twig_extension_string_extra, cs_twig_extension_directory_loader, cs_twig_extension_debug, cs_twig_autoescape, cs_twig_cache); cs_twig_extension_advanced, which lets Twig run any PHP function, is refused. Twig templates are cs_twig_templates, a list of {"id", "title", "template"} checked before it is written (include one with {% include \'cs-template:<id>\' %}; get_native_reference section "twig" lists them). Site-wide Custom Assets are cs_custom_scripts ({src, id, type, deps, ver, async, defer, nomodule, in_footer}) and cs_custom_styles ({src, id, rel, media}): https URLs only, checked and completed with the builder\'s defaults, and they need unfiltered_html and Cornerstone\'s global.document_assets permission. Run with dry_run: true first: it reports the before and after of every key without writing.';
+        return 'Write Theme Options. options is a map of key => value; get_theme_options lists the keys, their labels, current values and defaults. Each key is saved the way the Theme Options panel saves it (the before and after save actions fire, then the generated styles are purged), and every key is backed up first so restore_settings can put it back. A key this site does not register is refused, as are the keys another tool owns — Global CSS and JS, the palette, fonts — and the breakpoint and stack keys, which would reinterpret stored element data. Responsive variants ("<key>_bp_data4_4") are allowed alongside their key. Twig is switched on here: {"cs_twig_enabled": true}, with its sub-toggles (cs_twig_extension_wordpress, cs_twig_extension_html_extra, cs_twig_extension_string_extra, cs_twig_extension_directory_loader, cs_twig_extension_debug, cs_twig_autoescape, cs_twig_cache); cs_twig_extension_advanced, which lets Twig run any PHP function, is refused. Twig templates are cs_twig_templates, a list of {"id", "title", "template"} checked before it is written (include one with {% include \'cs-template:<id>\' %}; get_native_reference section "twig" lists them). Site-wide Custom Assets are cs_custom_scripts ({src, id, type, deps, ver, async, defer, nomodule, in_footer}) and cs_custom_styles ({src, id, rel, media}): https URLs only, checked and completed with the builder\'s defaults, and they need unfiltered_html and Cornerstone\'s global.document_assets permission. Fonts: *_font_family_selection (x_body_font_family_selection, x_headings_font_family_selection, …) takes a font\'s bare _id from the Font Manager ("body"), "inherit" or a "<source>:<name>" form, and anything else is refused; *_font_weight_selection takes "fw-normal" or "fw-bold". "global-ff:<id>" is written as "<id>" and "global-fw:<id>|fw-bold" or "<id>|fw-bold" as "fw-bold", each listed under normalized. Run with dry_run: true first: it reports the before and after of every key without writing.';
     }
 
     public function inputSchema(): array
@@ -63,7 +65,7 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
         }
 
         $snapshot = $this->reader->snapshot();
-        $plan = ThemeOptionsWriter::plan($options, $snapshot['keys'], $snapshot['values']);
+        $plan = ThemeOptionsWriter::plan($options, $snapshot['keys'], $snapshot['values'], self::fontIds());
 
         if ($plan['errors'] !== []) {
             throw new \InvalidArgumentException("These options could not be written:\n- " . implode("\n- ", $plan['errors']));
@@ -90,6 +92,10 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
             ], $plan['writes']),
             'unchanged' => $plan['unchanged'],
         ];
+
+        if ($plan['normalized'] !== []) {
+            $result['normalized'] = $plan['normalized'];
+        }
 
         if ($plan['writes'] === []) {
             $result['note'] = 'Every key already holds the value given, so nothing would change.';
@@ -125,6 +131,23 @@ final class UpdateThemeOptions implements ToolInterface, AnnotatedToolInterface
         }
 
         return $result;
+    }
+
+    /**
+     * The Font Manager's font ids, which a *_font_family_selection value is
+     * checked against; null when they cannot be read.
+     *
+     * @return string[]|null
+     */
+    private static function fontIds(): ?array
+    {
+        try {
+            $items = Json::decodeStored(get_option('cornerstone_font_items', '[]'));
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $items === null ? null : FontReferences::ids($items);
     }
 
     /**

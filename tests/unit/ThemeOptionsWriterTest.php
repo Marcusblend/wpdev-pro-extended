@@ -73,3 +73,63 @@ foreach (['x_custom_scripts', 'cs_v1_custom_js'] as $script) {
 foreach (['x_custom_styles', 'cs_v1_custom_css'] as $style) {
     T::ok(str_contains(ThemeOptionsWriter::REFUSED[$style], 'set_global_css'), sprintf('"%s" is still pointed at set_global_css', $style));
 }
+
+// Font keys (1.5.1) ------------------------------------------------------------------
+
+$fontOptions = [];
+
+foreach (file(dirname(__DIR__) . '/fixtures/cornerstone-7.9.4/font-theme-options.txt', FILE_IGNORE_NEW_LINES) ?: [] as $row) {
+    if ($row !== '' && $row[0] !== '#') {
+        [$option, $kind] = explode("\t", $row);
+        $fontOptions[$option] = $kind;
+    }
+}
+
+T::same(8, count($fontOptions), 'the fixture lists the four family and four weight keys');
+
+$fontIds = ['body', 'heading'];
+$fontRegistered = array_keys($fontOptions);
+
+foreach ($fontOptions as $option => $kind) {
+    $given = $kind === 'family' ? 'global-ff:heading' : 'global-fw:heading|fw-bold';
+    $want = $kind === 'family' ? 'heading' : 'fw-bold';
+    $plan = ThemeOptionsWriter::plan([$option => $given], $fontRegistered, [], $fontIds);
+    T::same([], $plan['errors'], "{$option}: {$given} is accepted");
+    T::same($want, $plan['writes'][0]['to'] ?? null, "{$option}: written as {$want}");
+    T::same([['key' => $option, 'from' => $given, 'to' => $want]], $plan['normalized'], "{$option}: and the change is reported");
+}
+
+$piped = ThemeOptionsWriter::plan(['x_body_font_weight_selection' => 'body|fw-normal'], $fontRegistered, [], $fontIds);
+T::same('fw-normal', $piped['writes'][0]['to'], 'a weight joined to its family with | loses the family');
+
+$already = ThemeOptionsWriter::plan(['x_body_font_family_selection' => 'global-ff:body'], $fontRegistered, ['x_body_font_family_selection' => 'body'], $fontIds);
+T::same(['x_body_font_family_selection'], $already['unchanged'], 'a normalised value that is already stored is unchanged');
+T::same(1, count($already['normalized']), 'and the normalisation is still reported');
+
+$right = ThemeOptionsWriter::plan(['x_body_font_family_selection' => 'body', 'x_body_font_weight_selection' => 'fw-normal', 'x_headings_font_family_selection' => 'inherit', 'x_logo_font_family_selection' => 'system:helveticaneue'], $fontRegistered, [], $fontIds);
+T::same([], $right['errors'], 'an _id, inherit and a source:name family are accepted');
+T::same([], $right['normalized'], 'and need no normalising');
+
+$missing = ThemeOptionsWriter::plan(['x_body_font_family_selection' => 'global-ff:nope'], $fontRegistered, [], $fontIds);
+T::same(1, count($missing['errors']), 'a family that is not in the Font Manager is refused');
+T::ok(str_contains($missing['errors'][0], '"body", "heading"') && str_contains($missing['errors'][0], '"nope"'), 'and the error lists the valid ids', $missing['errors'][0]);
+T::same([], $missing['writes'], 'and nothing is planned for it');
+
+$stack = ThemeOptionsWriter::plan(['x_body_font_family_selection' => '"Brand Sans", sans-serif'], $fontRegistered, [], $fontIds);
+T::same(1, count($stack['errors']), 'a literal stack is refused too');
+
+$noFonts = ThemeOptionsWriter::plan(['x_body_font_family_selection' => 'body'], $fontRegistered, [], []);
+T::ok(str_contains($noFonts['errors'][0] ?? '', 'add one with set_fonts'), 'with no fonts the error says to add one');
+
+$unknownIds = ThemeOptionsWriter::plan(['x_body_font_family_selection' => 'anything'], $fontRegistered, []);
+T::same([], $unknownIds['errors'], 'without the font list the family is not checked');
+
+$responsiveFont = ThemeOptionsWriter::plan(['x_body_font_weight_selection_bp_data4_4' => [null, 'global-fw:body|fw-bold', 'fw-normal', null, null]], $fontRegistered, [], $fontIds);
+T::same([null, 'fw-bold', 'fw-normal', null, null], $responsiveFont['writes'][0]['to'], 'a responsive variant is normalised value by value');
+T::same('x_body_font_weight_selection_bp_data4_4', $responsiveFont['normalized'][0]['key'], 'and reported under its own key');
+
+$responsiveBad = ThemeOptionsWriter::plan(['x_body_font_family_selection_bp_data4_4' => [null, 'global-ff:body', 'nope', null, null]], $fontRegistered, [], $fontIds);
+T::same(1, count($responsiveBad['errors']), 'a responsive family value outside the Font Manager is refused');
+
+$other = ThemeOptionsWriter::plan(['x_layout_site' => 'global-ff:body'], $registered, $current, $fontIds);
+T::same([], $other['normalized'], 'other keys are never normalised');

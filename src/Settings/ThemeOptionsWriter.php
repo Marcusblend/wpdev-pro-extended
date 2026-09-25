@@ -53,16 +53,22 @@ final class ThemeOptionsWriter
     /**
      * Work out what a set of updates would do.
      *
+     * Font keys are normalised on the way in (see normalizeFont()) and each
+     * change is listed in normalized; a family is then checked against the
+     * Font Manager when its ids are known.
+     *
      * @param  array<string, mixed> $updates    Key => the value asked for.
      * @param  string[]             $registered Keys Cornerstone registers.
      * @param  array<string, mixed> $current    The values as stored.
-     * @return array{writes: array<int, array<string, mixed>>, unchanged: string[], errors: string[]}
+     * @param  string[]|null        $fontIds    The Font Manager's font ids; null when they cannot be read.
+     * @return array{writes: array<int, array<string, mixed>>, unchanged: string[], errors: string[], normalized: array<int, array{key: string, from: mixed, to: mixed}>}
      */
-    public static function plan(array $updates, array $registered, array $current): array
+    public static function plan(array $updates, array $registered, array $current, ?array $fontIds = null): array
     {
         $writes = [];
         $unchanged = [];
         $errors = [];
+        $normalized = [];
 
         foreach ($updates as $key => $value) {
             if (! is_string($key) || $key === '') {
@@ -87,7 +93,14 @@ final class ThemeOptionsWriter
                 continue;
             }
 
-            $problems = self::valueErrors($key, $value);
+            $fixed = self::normalizeFont($base, $value);
+
+            if ($fixed !== $value) {
+                $normalized[] = ['key' => $key, 'from' => $value, 'to' => $fixed];
+                $value = $fixed;
+            }
+
+            $problems = array_merge(self::fontErrors($key, $base, $value, $fontIds), self::valueErrors($key, $value));
 
             if ($problems !== []) {
                 array_push($errors, ...$problems);
@@ -111,7 +124,74 @@ final class ThemeOptionsWriter
             ];
         }
 
-        return ['writes' => $writes, 'unchanged' => $unchanged, 'errors' => $errors];
+        return ['writes' => $writes, 'unchanged' => $unchanged, 'errors' => $errors, 'normalized' => $normalized];
+    }
+
+    /**
+     * A font key's value in the form Cornerstone resolves.
+     *
+     * *_font_family_selection holds a font's bare _id, so "global-ff:<id>"
+     * becomes "<id>" (Cornerstone would read "global-ff" as a font source and
+     * render the fallback font). *_font_weight_selection holds "fw-normal" or
+     * "fw-bold": Cornerstone adds the family itself, so
+     * "global-fw:<id>|fw-bold" and "<id>|fw-bold" become "fw-bold" (as given,
+     * they render as inherit). A responsive variant's list is normalised
+     * value by value. Every other key is returned as it is.
+     */
+    public static function normalizeFont(string $base, mixed $value): mixed
+    {
+        $normalize = match (true) {
+            str_ends_with($base, FontReferences::THEME_FAMILY_SUFFIX) => [FontReferences::class, 'normalizeThemeFamily'],
+            str_ends_with($base, FontReferences::THEME_WEIGHT_SUFFIX) => [FontReferences::class, 'normalizeThemeWeight'],
+            default                                                   => null,
+        };
+
+        if ($normalize === null) {
+            return $value;
+        }
+
+        if (is_array($value)) {
+            return array_map(static fn (mixed $item): mixed => is_array($item) ? $item : $normalize($item), $value);
+        }
+
+        return $normalize($value);
+    }
+
+    /**
+     * A family written to *_font_family_selection must be a font the Font
+     * Manager has (its _id), "inherit", or a "<source>:<name>" form
+     * GlobalFonts::locate_font() looks up; anything else renders the
+     * fallback font. Not checked when the ids cannot be read.
+     *
+     * @param  string[]|null $fontIds
+     * @return string[]
+     */
+    public static function fontErrors(string $key, string $base, mixed $value, ?array $fontIds): array
+    {
+        if ($fontIds === null || ! str_ends_with($base, FontReferences::THEME_FAMILY_SUFFIX)) {
+            return [];
+        }
+
+        $errors = [];
+
+        foreach (is_array($value) ? $value : [$value] as $family) {
+            if ($family === null || $family === '' || ! is_string($family)) {
+                continue;
+            }
+
+            if (in_array($family, $fontIds, true) || $family === 'inherit' || FontReferences::isSourceName($family) || str_contains($family, '{{') || stripos($family, 'var(') !== false) {
+                continue;
+            }
+
+            $errors[] = sprintf(
+                '"%s" must be a font\'s _id from the Font Manager (%s), "inherit", or a "<source>:<name>" form such as "system:helveticaneue"; "%s" is none of these, so Cornerstone would render the fallback font.',
+                $key,
+                $fontIds === [] ? 'it has no fonts yet; add one with set_fonts' : 'one of "' . implode('", "', $fontIds) . '"',
+                $family
+            );
+        }
+
+        return $errors;
     }
 
     /**
