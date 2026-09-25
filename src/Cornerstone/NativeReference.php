@@ -14,7 +14,7 @@ namespace ProExtended\Cornerstone;
  */
 final class NativeReference
 {
-    public const SECTIONS = ['dynamic_content', 'twig', 'conditions', 'loopers', 'parameter_types', 'regions'];
+    public const SECTIONS = ['dynamic_content', 'twig', 'conditions', 'loopers', 'parameter_types', 'regions', 'fonts'];
 
     private const CACHE_PREFIX = 'pe_native_ref_';
     private const CACHE_TTL = 604800; // A week; the version key is what normally retires an entry.
@@ -81,6 +81,7 @@ final class NativeReference
                                   ?? ['unavailable' => 'Cornerstone\'s looper-provider control partial could not be read (cs_partial_controls).'],
             'parameter_types' => $this->parameterTypes(),
             'regions'         => $this->regions(),
+            'fonts'           => (new FontCatalog())->read(),
         };
     }
 
@@ -179,6 +180,12 @@ final class NativeReference
                 }
                 $parts[] = function_exists('wp_timezone_string') ? wp_timezone_string() : '';
                 $parts[] = function_exists('wp_cache_get_last_changed') ? wp_cache_get_last_changed('posts') : '';
+                break;
+
+            case 'fonts':
+                foreach (['cornerstone_font_items', 'cornerstone_font_config'] as $option) {
+                    $parts[] = function_exists('get_option') ? get_option($option, null) : null;
+                }
                 break;
 
             case 'conditions':
