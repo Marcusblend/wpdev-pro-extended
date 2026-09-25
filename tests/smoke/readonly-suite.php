@@ -568,6 +568,96 @@ $secondRun = S::ok(S::call('validate_layout', $literal), 'validate them again');
 S::check(($firstRun['codes']['literal-color'] ?? 0) === 2, 'literal-color flags the colour and its _alt twin, not the var() value', (string) wp_json_encode($firstRun['issues'] ?? null));
 S::check(($firstRun['issues'] ?? null) === ($secondRun['issues'] ?? []), 'the same layout gives the same warnings twice');
 
+// 26. Font references (1.5.1) -------------------------------------------------------------
+
+S::section('26 font references (1.5.1)');
+
+$fontsRef = S::ok(S::call('get_native_reference', ['section' => 'fonts', 'refresh' => true]), 'get_native_reference fonts');
+$fontRefBlock = (array) ($fontsRef['reference'] ?? []);
+S::check(
+    ($fontRefBlock['element_family'] ?? null) === '<_id>' && ($fontRefBlock['element_weight'] ?? null) === ['fw-normal', 'fw-bold']
+        && ($fontRefBlock['theme_option_family'] ?? null) === '<_id>' && ($fontRefBlock['theme_option_weight'] ?? null) === ['fw-normal', 'fw-bold'],
+    'the reference block gives the bare _id and fw-normal/fw-bold forms',
+    (string) wp_json_encode($fontRefBlock)
+);
+S::check(! str_contains((string) wp_json_encode($fontRefBlock['example'] ?? null), 'global-f'), 'and its example has no global-ff:/global-fw: form', (string) wp_json_encode($fontRefBlock['example'] ?? null));
+$refFonts = array_column((array) ($fontsRef['fonts'] ?? []), null, '_id');
+S::check(array_map('strval', array_keys($refFonts)) === $fontIds, 'it lists every font item', (string) wp_json_encode(array_keys($refFonts)));
+
+foreach (array_merge(array_values($refFonts), (array) ($fontsRef['custom_font_items'] ?? [])) as $fontRow) {
+    if (isset($fontRow['problem'])) {
+        S::attention('Font "' . ($fontRow['_id'] ?? '?') . '": ' . $fontRow['problem']);
+    }
+}
+
+$bp = pro_extended()->elementContext()->breakpointTag();
+$firstFont = $fontIds[0] ?? null;
+$firstRow = $firstFont !== null ? (array) ($refFonts[$firstFont] ?? []) : [];
+
+if ($firstFont === null) {
+    S::skip('font rendering', 'this site has no fonts');
+} elseif (($firstRow['resolved_by'] ?? null) !== 'cornerstone') {
+    S::skip('font rendering', 'the fonts section could not resolve through GlobalFonts: ' . wp_json_encode($fontsRef['notes'] ?? null));
+} elseif (! has_filter('cs_css_post_process_tss-ff') || ! has_filter('cs_css_post_process_tss-fw')) {
+    S::skip('font rendering', 'GlobalFonts\' post-process filters are not registered in this context');
+} else {
+    // render_preview returns the element's HTML only; Cornerstone writes its
+    // CSS through the post-process filters the TSS global-ff and global-fw
+    // functions call, so the check calls those filters with what the element
+    // stores.
+    $fontPreview = S::ok(S::call('render_preview', ['elements' => [['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_content' => 'PE TEST font', 'text_font_family' => $firstFont, 'text_font_weight' => 'fw-normal']]]), "render_preview of a Text with text_font_family \"{$firstFont}\"");
+    S::check(str_contains((string) ($fontPreview['html'] ?? ''), 'PE TEST font'), 'it renders');
+
+    $familyCss = (string) apply_filters('cs_css_post_process_tss-ff', $firstFont);
+    S::check($familyCss !== '' && $familyCss === ($firstRow['stack'] ?? null), "text_font_family \"{$firstFont}\" renders the stack the fonts section reports", 'rendered ' . $familyCss . ', reported ' . wp_json_encode($firstRow['stack'] ?? null));
+    $prefixedCss = (string) apply_filters('cs_css_post_process_tss-ff', 'global-ff:' . $firstFont);
+    S::check($prefixedCss !== $familyCss, "\"global-ff:{$firstFont}\" renders another stack (the fallback font)", $prefixedCss);
+    $weightCss = (string) apply_filters('cs_css_post_process_tss-fw', $firstFont . '|fw-normal');
+    S::check($weightCss !== '' && $weightCss === (string) ($firstRow['weightNormal'] ?? ''), 'fw-normal renders the weightNormal the fonts section reports', 'rendered ' . $weightCss . ', reported ' . wp_json_encode($firstRow['weightNormal'] ?? null));
+    $joinedCss = (string) apply_filters('cs_css_post_process_tss-fw', $firstFont . '|' . $firstFont . '|fw-normal');
+    S::check($joinedCss === 'inherit', "a weight stored as \"{$firstFont}|fw-normal\" renders inherit", $joinedCss);
+}
+
+$fontLintId = $firstFont ?? 'body';
+$fontLint = S::ok(S::call('validate_layout', ['layout_data' => [
+    ['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_content' => 'PE TEST', 'text_font_family' => 'global-ff:' . $fontLintId, 'text_font_weight' => $fontLintId . '|fw-normal'],
+    ['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => $bp, 'text_content' => 'PE TEST', 'text_font_family' => $fontLintId, 'text_font_weight' => 'fw-bold', 'text_font_weight_alt' => 'global-fw:' . $fontLintId . '|fw-bold'],
+]]), 'validate prefixed and joined font references');
+$fontIssues = array_values(array_filter((array) ($fontLint['issues'] ?? []), static fn($issue): bool => in_array($issue['code'] ?? '', ['font-ref-prefix', 'font-weight-shape', 'literal-font-family'], true)));
+$fontIssueAt = array_map(static fn($issue): string => $issue['path'] . ' ' . $issue['code'], $fontIssues);
+S::check(in_array('0 font-ref-prefix', $fontIssueAt, true), "font-ref-prefix flags \"global-ff:{$fontLintId}\"", (string) wp_json_encode($fontIssueAt));
+S::check(in_array('0 font-weight-shape', $fontIssueAt, true), "font-weight-shape flags \"{$fontLintId}|fw-normal\"", (string) wp_json_encode($fontIssueAt));
+S::check(in_array('1 font-ref-prefix', $fontIssueAt, true), 'and an _alt weight written with global-fw:', (string) wp_json_encode($fontIssueAt));
+S::check(str_contains((string) ($fontIssues[0]['message'] ?? ''), '"' . $fontLintId . '"'), 'the message gives the value to write', (string) ($fontIssues[0]['message'] ?? ''));
+
+if ($firstFont !== null) {
+    S::check(count($fontIssueAt) === 3, "the bare _id \"{$firstFont}\" and fw-bold are not flagged", (string) wp_json_encode($fontIssueAt));
+}
+
+$dryStack = S::ok(S::call('set_fonts', ['config' => ['customFontItems' => [[
+    '_id'    => 'pe-smoke-split',
+    'family' => 'PE Smoke Sans',
+    'stack'  => '"PE Smoke Sans", "Helvetica Neue", Arial, sans-serif',
+    'files'  => [['weight' => '400', 'style' => 'normal', 'filename' => 'pe-smoke-sans-400.woff2', 'url' => '/wp-content/uploads/pe-smoke-sans-400.woff2']],
+]]], 'dry_run' => true]), 'set_fonts dry run of a custom item whose stack has commas');
+$stackChanges = array_column((array) ($dryStack['normalized'] ?? []), 'to', 'key');
+S::check(
+    ($dryStack['dry_run'] ?? null) === true && ($stackChanges['stack'] ?? null) === '"PE Smoke Sans"' && ($stackChanges['fallback'] ?? null) === '"Helvetica Neue", Arial, sans-serif' && ($dryStack['backup_ids'] ?? null) === [],
+    'it reports the stack split into stack and fallback, and writes nothing',
+    (string) wp_json_encode(array_intersect_key($dryStack, ['normalized' => 1, 'dry_run' => 1, 'backup_ids' => 1]))
+);
+S::isError(S::call('set_fonts', ['config' => ['customFontItems' => [['_id' => 'pe-smoke-split', 'family' => 'PE Smoke Sans', 'stack' => ', sans-serif', 'files' => [['weight' => '400', 'style' => 'normal', 'filename' => 'pe-smoke-sans-400.woff2', 'url' => '/wp-content/uploads/pe-smoke-sans-400.woff2']]]]], 'dry_run' => true]), 'a stack with no first family is refused', '.stack');
+
+if ($firstFont === null) {
+    S::skip('theme option font normalisation', 'this site has no fonts');
+} else {
+    $themeFonts = S::ok(S::call('update_theme_options', ['options' => ['x_body_font_family_selection' => 'global-ff:' . $firstFont, 'x_body_font_weight_selection' => 'global-fw:' . $firstFont . '|fw-normal'], 'dry_run' => true]), 'update_theme_options dry run with global-ff:/global-fw: body font values');
+    $themeChanges = array_column((array) ($themeFonts['normalized'] ?? []), 'to', 'key');
+    S::check(($themeChanges['x_body_font_family_selection'] ?? null) === $firstFont && ($themeChanges['x_body_font_weight_selection'] ?? null) === 'fw-normal', "they are normalised to \"{$firstFont}\" and \"fw-normal\"", (string) wp_json_encode($themeFonts['normalized'] ?? null));
+    S::check(($themeFonts['dry_run'] ?? null) === true && ! isset($themeFonts['backups']) && ! isset($themeFonts['written']), 'and nothing is written');
+    S::isError(S::call('update_theme_options', ['options' => ['x_body_font_family_selection' => 'pe-smoke-no-such-font'], 'dry_run' => true]), 'a body font the Font Manager does not have is refused', 'Font Manager');
+}
+
 // Nothing changed ------------------------------------------------------------------------
 
 S::section('nothing was written');
