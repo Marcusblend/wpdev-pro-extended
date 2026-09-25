@@ -26,6 +26,10 @@ T::same('body', F::familyFix(' global-ff:body, sans-serif '), 'a trailing fallba
 T::same('body', F::familyFix('global-fw:body|fw-bold'), 'a weight reference in a family setting gives the id');
 T::same(null, F::familyFix('body'), 'a bare id needs no fix');
 T::same(null, F::familyFix('global-ff:'), 'a prefix with nothing after it has no fix');
+T::same('Hind Semi Bold', F::familyFix('global-ff:Hind Semi Bold'), 'an id with spaces (older builders) is kept whole');
+T::same('Hind Semi Bold', F::familyFix('global-fw:Hind Semi Bold|fw-bold'), 'and read up to the weight');
+T::same('Hind Semi Bold', F::normalizeThemeFamily('global-ff:Hind Semi Bold'), 'a theme option family with spaces normalises to its id');
+T::same('fw-normal', F::normalizeThemeWeight('global-fw:Hind Semi Bold|fw-normal'), 'and its weight to fw-normal');
 
 T::same('fw-bold', F::weightFix('global-fw:body|fw-bold'), 'global-fw:<id>|fw-bold is fixed to fw-bold');
 T::same('fw-normal', F::weightFix('body|fw-normal'), '<id>|fw-normal is fixed to fw-normal');

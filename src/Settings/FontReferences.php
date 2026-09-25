@@ -90,9 +90,14 @@ final class FontReferences
 
         foreach ([self::FAMILY_PREFIX, self::WEIGHT_PREFIX] as $prefix) {
             if (str_starts_with($value, $prefix)) {
+                // Font ids are not always slugs: fonts made in older builders
+                // carry ids such as "Hind Semi Bold". Everything up to a weight
+                // ("|fw-bold") or a fallback list (", sans-serif") is the id.
                 $rest = substr($value, strlen($prefix));
+                $rest = (string) preg_split('/[|,]/', $rest, 2)[0];
+                $id = trim($rest, " \t\n\r\0\x0B\"'");
 
-                return preg_match('/^([A-Za-z0-9_-]+)/', $rest, $match) === 1 ? $match[1] : null;
+                return $id !== '' ? $id : null;
             }
         }
 
@@ -137,7 +142,13 @@ final class FontReferences
             return $value;
         }
 
-        return preg_match('/^' . preg_quote(self::FAMILY_PREFIX, '/') . '([A-Za-z0-9_-]+)$/', trim($value), $match) === 1 ? $match[1] : $value;
+        // Only an exact "global-ff:<id>" is rewritten; a value that also
+        // carries a weight or a fallback list is left for validation to refuse.
+        if (str_contains($value, '|') || str_contains($value, ',')) {
+            return $value;
+        }
+
+        return self::familyFix($value) ?? $value;
     }
 
     /**

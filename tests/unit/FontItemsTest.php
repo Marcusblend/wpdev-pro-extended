@@ -59,6 +59,19 @@ T::same(null, FontItems::validateShape(['_id' => 'peX', 'color' => 'red'], 'font
 $errors = [];
 T::same(null, FontItems::validateShape(['_id' => 'peX', 'stack' => 'a;b'], 'fonts[0]', $errors), 'rejects unsafe stacks');
 
+// Ids from older builders ("Hind Semi Bold") are not slugs.
+$errors = [];
+T::same(null, FontItems::validateShape(['_id' => 'Hind Semi Bold', 'title' => 'Hind'], 'fonts[0]', $errors), 'a new font id with spaces is refused');
+$errors = [];
+T::same('Hind Semi Bold', FontItems::validateShape(['_id' => 'Hind Semi Bold', 'stack' => '"Hind", sans-serif'], 'fonts[0]', $errors, ['Hind Semi Bold'])['_id'] ?? null, 'a stored font id with spaces can be updated');
+T::same([], $errors, 'without errors');
+$errors = [];
+$merged = FontItems::mergeConfig(['customFontItems' => [['_id' => 'Hind Semi Bold', 'family' => 'Hind', 'files' => []]]], ['customFontItems' => [['_id' => 'Hind Semi Bold', 'fallback' => 'sans-serif']]], $errors);
+T::same([], $errors, 'a stored custom font item id with spaces can be updated');
+$errors = [];
+FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'Brand Sans', 'family' => 'Brand Sans', 'files' => []]]], $errors);
+T::ok($errors !== [], 'a new custom font item id with spaces is refused');
+
 // Config.
 $stored = ['googleSubsets' => [], 'typekitKitID' => 'abc', 'typekitKitLoadAsCSS' => false, 'customFontItems' => [['_id' => 'brand1', 'family' => 'Brand Sans', 'files' => []]]];
 $errors = [];

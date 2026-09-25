@@ -7,6 +7,7 @@ namespace ProExtended\Mcp\Tools;
 use ProExtended\Cornerstone\DocumentGateway;
 use ProExtended\Mcp\ToolPermissionException;
 use ProExtended\Settings\FontItems;
+use ProExtended\Settings\FontReferences;
 use ProExtended\Settings\ItemMerger;
 use ProExtended\Settings\ItemRemover;
 use ProExtended\Settings\ReferenceScanner;
@@ -101,9 +102,11 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
 
         $errors = [];
         $items = [];
+        $storedItems = StoredList::listFrom($this->backups->readRaw(self::ITEMS_OPTION), self::ITEMS_OPTION);
+        $storedIds = FontReferences::ids($storedItems);
 
         foreach ($fonts as $i => $font) {
-            $item = FontItems::validateShape($font, sprintf('fonts[%d]', $i), $errors);
+            $item = FontItems::validateShape($font, sprintf('fonts[%d]', $i), $errors, $storedIds);
 
             if ($item !== null) {
                 $items[] = $item;
@@ -116,7 +119,6 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
             throw new \InvalidArgumentException(implode(' ', $errors));
         }
 
-        $storedItems = StoredList::listFrom($this->backups->readRaw(self::ITEMS_OPTION), self::ITEMS_OPTION);
         $storedConfig = StoredList::objectFrom($this->backups->readRaw(self::CONFIG_OPTION), self::CONFIG_OPTION);
 
         $config = $storedConfig;

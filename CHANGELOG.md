@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-09-25
+
+Font ids that are not slugs. Font items made in older builders carry ids such as `"Hind Semi Bold"`, and 1.5.1 read only the first word of them. 47 tools. `wp pe warm` after deploying, as for 1.5.1.
+
+### Fixed
+
+- **A prefixed font id with spaces was cut at the first space**: the `font-ref-prefix` warning told a client to write `"Hind"` for `"global-ff:Hind Semi Bold"`. The whole id up to a weight (`|fw-bold`) or a fallback list (`, sans-serif`) is now the id, so the warning gives `"Hind Semi Bold"`
+- **`update_theme_options` refused `"global-ff:<id>"` when the id had spaces**: the family was not rewritten, so validation refused it as an unknown font. An exact `"global-ff:<id>"` is now written as `"<id>"` whatever the id's characters. A value that also carries a weight or a fallback list is still refused, with the list of valid ids
+- **`set_fonts` refused to update a font whose stored id has spaces**: in `fonts` and in `config.customFontItems`, a new item still needs a slug id (letters, digits, `_` or `-`); an item that already exists is matched by the id it was stored with, so a font from an older builder can be repaired in place
+- **The read-only smoke suite failed on a site whose first font already renders the fallback stack**: comparing the bare id with `"global-ff:<id>"` cannot tell them apart there, so the check is skipped with the reason. `get_native_reference` section `fonts` still flags the font
+
 ## [1.5.1] - 2026-09-25
 
 Fonts, referenced the way Cornerstone resolves them. 1.5.0 told clients to write a global font as `"global-ff:<_id>"` with the weight `"global-fw:<_id>|fw-normal"`, and neither form renders: every element and theme option built from that guidance fell back to Helvetica at `font-weight: inherit`. The guidance now gives the font's bare `_id` and `"fw-normal"` or `"fw-bold"`, validation flags the old forms, `update_theme_options` rewrites them, and `get_native_reference` shows each font as Cornerstone resolves it. 47 tools. After deploying, run `wp pe warm`: the version change retires the stored control surfaces the style warnings read.

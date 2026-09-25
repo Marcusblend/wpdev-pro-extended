@@ -36,10 +36,15 @@ final class FontItems
     /**
      * Check the shape of a font entry as given (before merging).
      *
+     * A new font needs a slug `_id` (ID_PATTERN). A font already in the
+     * Font Manager is matched by the `_id` it was stored with, which older
+     * builders did not keep to slugs ("Hind Semi Bold").
+     *
      * @param  string[] $errors
+     * @param  string[] $existingIds The `_id`s already stored.
      * @return array<string, mixed>|null
      */
-    public static function validateShape(mixed $font, string $label, array &$errors): ?array
+    public static function validateShape(mixed $font, string $label, array &$errors, array $existingIds = []): ?array
     {
         if (! is_array($font) || ($font !== [] && array_is_list($font))) {
             $errors[] = sprintf('%s must be an object.', $label);
@@ -53,7 +58,7 @@ final class FontItems
             return null;
         }
 
-        if (! isset($font['_id']) || ! is_string($font['_id']) || ! preg_match(self::ID_PATTERN, $font['_id'])) {
+        if (! isset($font['_id']) || ! is_string($font['_id']) || (! preg_match(self::ID_PATTERN, $font['_id']) && ! in_array($font['_id'], $existingIds, true))) {
             $errors[] = sprintf('%s._id must be 3-64 characters: a letter, then letters, digits, "_" or "-".', $label);
             return null;
         }
@@ -410,12 +415,19 @@ final class FontItems
                 continue;
             }
 
-            if (! isset($item['_id']) || ! is_string($item['_id']) || ! preg_match('/^[A-Za-z0-9_-]{1,64}$/', $item['_id'])) {
+            if (! isset($item['_id']) || ! is_string($item['_id']) || trim($item['_id']) === '') {
                 $errors[] = $label . '._id is required (letters, digits, "_" or "-").';
                 continue;
             }
 
             $exists = array_key_exists($item['_id'], $index);
+
+            // A new item gets a slug id; an existing one keeps whatever id it
+            // was stored with (older builders saved ids such as "Hind Semi Bold").
+            if (! $exists && ! preg_match('/^[A-Za-z0-9_-]{1,64}$/', $item['_id'])) {
+                $errors[] = $label . '._id is required (letters, digits, "_" or "-").';
+                continue;
+            }
 
             if (! $exists && (! isset($item['family']) || ! isset($item['files']))) {
                 $errors[] = $label . ' is new, so it needs family and files.';

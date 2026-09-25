@@ -4,7 +4,7 @@
  * Plugin Name: Pro Extended
  * Plugin URI:  https://github.com/renandadalte/wpdev-pro-extended
  * Description: Extends Pro Theme / Cornerstone with MCP Server, Design Tokens, Element Defaults, and developer utilities.
- * Version:     1.5.1
+ * Version:     1.5.2
  * Author:      Renan Dadalte
  * Author URI:  https://github.com/renandadalte
  * License:     GPL-2.0-or-later
@@ -22,7 +22,7 @@ if (! defined('ABSPATH')) {
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-define('PE_VERSION', '1.5.1');
+define('PE_VERSION', '1.5.2');
 define('PE_FILE', __FILE__);
 define('PE_DIR', plugin_dir_path(__FILE__));
 define('PE_URL', plugin_dir_url(__FILE__));
