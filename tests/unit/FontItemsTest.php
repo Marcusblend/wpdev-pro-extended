@@ -66,8 +66,77 @@ $merged = FontItems::mergeConfig($stored, ['fontDisplay' => 'swap', 'customFontI
 T::same([], $errors, 'merges a partial config');
 T::same(['fontDisplay', 'customFontItems'], $merged['changed'], 'reports changed keys');
 T::same(false, $merged['config']['typekitKitLoadAsCSS'], 'keeps keys it did not change');
-T::same('"Brand Sans", serif', $merged['config']['customFontItems'][0]['stack'], 'merges custom items by _id');
+T::same('"Brand Sans"', $merged['config']['customFontItems'][0]['stack'], 'merges custom items by _id, with the stack cut to its first family');
+T::same('serif', $merged['config']['customFontItems'][0]['fallback'], 'and the rest moved to fallback');
 T::same(2, count($merged['config']['customFontItems']), 'appends new custom items');
+T::same([['item' => 'brand1', 'key' => 'stack', 'from' => '"Brand Sans", serif', 'to' => '"Brand Sans"'], ['item' => 'brand1', 'key' => 'fallback', 'from' => null, 'to' => 'serif']], array_map(static fn (array $n): array => array_diff_key($n, ['reason' => 1]), $merged['normalized']), 'and reports both changes');
+T::same([], $merged['warnings'], 'no warnings for plain weights');
+
+// Custom items: stack, fallback and files ----------------------------------------
+
+$file = ['weight' => '400', 'style' => 'normal', 'filename' => 'b.woff2', 'url' => '/wp-content/uploads/b.woff2', 'id' => 12];
+
+$errors = [];
+$split = FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Archivo', 'stack' => '"Archivo", "Helvetica Neue", Arial, sans-serif', 'fallback' => 'Arial, system-ui', 'files' => [$file]]]], $errors);
+$item = $split['config']['customFontItems'][0];
+T::same([], $errors, 'a comma stack is not an error');
+T::same('"Archivo"', $item['stack'], 'the stack keeps the first family, quoted');
+T::same('Arial, system-ui, "Helvetica Neue", sans-serif', $item['fallback'], 'the rest is appended after the fallback given, without repeats');
+T::same(['stack', 'fallback'], array_column($split['normalized'], 'key'), 'both are reported as normalised');
+
+$errors = [];
+$quoted = FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'stack' => 'Brand Sans', 'files' => [$file]]]], $errors);
+T::same('"Brand Sans"', $quoted['config']['customFontItems'][0]['stack'], 'an unquoted single family is quoted');
+T::same(['stack'], array_column($quoted['normalized'], 'key'), 'and reported');
+T::ok(! array_key_exists('fallback', $quoted['config']['customFontItems'][0]), 'with no fallback invented');
+
+$errors = [];
+$single = FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'stack' => "'Brand Sans'", 'fallback' => 'sans-serif', 'files' => [$file]]]], $errors);
+T::same([], $single['normalized'], 'a single quoted family is left as it is');
+T::same('sans-serif', $single['config']['customFontItems'][0]['fallback'], 'fallback is stored');
+
+foreach ([', sans-serif' => 'an empty first family', '' => 'an empty stack', 'sans-serif' => 'a generic family', '"Brand", "Sans' => 'a broken quote'] as $stack => $what) {
+    $errors = [];
+    FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'stack' => $stack, 'files' => [$file]]]], $errors);
+    T::ok($errors !== [] && str_contains($errors[0], '.stack'), "{$what} is refused", implode(' ', $errors));
+}
+
+$errors = [];
+FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'fallback' => 'a;b', 'files' => [$file]]]], $errors);
+T::ok($errors !== [] && str_contains($errors[0], 'fallback'), 'an unsafe fallback is refused');
+
+$errors = [];
+FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'title' => 'x', 'files' => [$file]]]], $errors);
+T::ok($errors !== [] && str_contains($errors[0], 'allowed: _id, family, stack, fallback, files'), 'keys Cornerstone does not read are refused', implode(' ', $errors));
+
+// A stored item from 1.5.0's guidance is fixed when it is next touched.
+$legacy = ['customFontItems' => [['_id' => 'brand-sans', 'family' => 'Brand Sans', 'stack' => '"Brand Sans", sans-serif', 'files' => [$file], 'extra' => 'kept']]];
+$errors = [];
+$touched = FontItems::mergeConfig($legacy, ['customFontItems' => [['_id' => 'brand-sans', 'fallback' => 'Arial']]], $errors);
+T::same('"Brand Sans"', $touched['config']['customFontItems'][0]['stack'], 'a stored comma stack is split when the item is updated');
+T::same('Arial, sans-serif', $touched['config']['customFontItems'][0]['fallback'], 'after the fallback being written');
+T::same('kept', $touched['config']['customFontItems'][0]['extra'], 'stored keys the tool does not know are kept');
+
+T::same(['"Brand Sans"', 'Arial', "'A, B'", ''], FontItems::splitFontList('"Brand Sans", Arial, \'A, B\','), 'splitFontList respects quotes');
+
+// Variable fonts: a range weight is passed through, with a warning when it is the only weight.
+$range = ['weight' => '100 900', 'style' => 'normal', 'filename' => 'var.woff2', 'url' => '/wp-content/uploads/var.woff2'];
+
+$errors = [];
+$variable = FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-var', 'family' => 'Brand Var', 'stack' => '"Brand Var"', 'files' => [$range]]]], $errors);
+T::same([], $errors, 'a range weight is accepted');
+T::same('100 900', $variable['config']['customFontItems'][0]['files'][0]['weight'], 'and stored untouched');
+T::ok(count($variable['warnings']) === 1 && str_contains($variable['warnings'][0], 'fw-normal renders 100') && str_contains($variable['warnings'][0], '"400"'), 'a range as the only weight warns that fw-normal resolves to its lower end', implode(' ', $variable['warnings']));
+
+$errors = [];
+$mixed = FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-var', 'family' => 'Brand Var', 'stack' => '"Brand Var"', 'files' => [$range, ['weight' => '400'] + $range, ['weight' => '700'] + $range]]]], $errors);
+T::same([], $mixed['warnings'], 'the range with numeric entries for the same file does not warn');
+
+foreach (['900 100', '0 900', '100 1100', '100-900', '450'] as $weight) {
+    $errors = [];
+    FontItems::mergeConfig([], ['customFontItems' => [['_id' => 'brand-var', 'family' => 'Brand Var', 'files' => [['weight' => $weight] + $range]]]], $errors);
+    T::ok($errors !== [], "a weight of \"{$weight}\" is refused");
+}
 
 $errors = [];
 FontItems::mergeConfig($stored, ['fontDisplay' => 'fast'], $errors);

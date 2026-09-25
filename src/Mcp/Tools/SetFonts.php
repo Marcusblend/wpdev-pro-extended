@@ -34,7 +34,7 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Add or update global fonts by _id ({_id, title, family, source: google|typekit|custom|system, stack, weightNormal, weightBold, weightSelection, name, fallback}) and optionally merge font settings (config: googleSubsets, typekitKitID, googleDisabled, googleFontsURL, fontDisplay, customFontItems, customFontFaceCSS). name, stack and weights are derived the way Cornerstone derives them when omitted. Reference fonts as "global-ff:<_id>" and "global-fw:<_id>|fw-normal". remove lists font or group IDs to delete: a font still used by documents, element data, templates or theme options (such as the body font) is only removed with force: true, and the last font cannot be removed. Same group/allow_locked rules as set_colors. Run with dry_run: true first.';
+        return 'Add or update global fonts by _id ({_id, title, family, source: google|typekit|custom|system, stack, weightNormal, weightBold, weightSelection, name, fallback}) and optionally merge font settings (config: googleSubsets, typekitKitID, googleDisabled, googleFontsURL, fontDisplay, customFontItems, customFontFaceCSS). name, stack and weights are derived the way Cornerstone derives them when omitted. Reference a font in an element by its bare _id ("text_font_family": "body") with the weight "fw-normal" or "fw-bold" ("text_font_weight": "fw-bold"); Theme Options take the same: x_body_font_family_selection "body", x_body_font_weight_selection "fw-normal". Self-hosted fonts are config.customFontItems {_id, family, stack, fallback, files: [{weight, style, filename, url, id}]}: Cornerstone prints stack as the @font-face font-family, so it must be the one quoted family ("\\"Brand Sans\\""), and fallback holds the rest ("sans-serif"); a stack with commas is split that way and reported under normalized. A variable font\'s files[].weight may be a range ("100 900"), printed as given; list the same file under "400" and "700" as well so fw-normal and fw-bold resolve. remove lists font or group IDs to delete: a font still used by documents, element data, templates or theme options (such as the body font) is only removed with force: true, and the last font cannot be removed. Same group/allow_locked rules as set_colors. Run with dry_run: true first.';
     }
 
     public function inputSchema(): array
@@ -65,7 +65,7 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
                 ],
                 'config' => [
                     'type'        => 'object',
-                    'description' => 'Optional. Partial font settings to merge (customFontItems merge by _id; customFontFaceCSS needs edit_css).',
+                    'description' => 'Optional. Partial font settings to merge. customFontItems merge by _id ({_id, family, stack, fallback, files}); a stack must be one quoted family, and one with commas is split into stack and fallback. customFontFaceCSS needs edit_css, and Cornerstone 7.9.4 stores it without printing it on the front end: an @font-face of your own goes in Global CSS.',
                 ],
                 'allow_locked' => [
                     'type'        => 'boolean',
@@ -121,11 +121,15 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
 
         $config = $storedConfig;
         $configChanged = [];
+        $normalized = [];
+        $configWarnings = [];
 
         if ($configUpdate !== null) {
             $merged = FontItems::mergeConfig($storedConfig, $configUpdate, $errors);
             $config = $merged['config'];
             $configChanged = $merged['changed'];
+            $normalized = $merged['normalized'];
+            $configWarnings = $merged['warnings'];
         }
 
         $merge = ItemMerger::merge($storedItems, $items, $group, $allowLocked);
@@ -208,9 +212,10 @@ final class SetFonts implements ToolInterface, AnnotatedToolInterface
                 'before'  => (object) array_intersect_key($storedConfig, array_flip($configChanged)),
                 'after'   => (object) array_intersect_key($config, array_flip($configChanged)),
             ],
+            'normalized'     => $normalized,
             'backup_ids'     => (object) [],
             'write_path'     => null,
-            'warnings'       => [],
+            'warnings'       => $configWarnings,
         ];
 
         if (! $result['changed']) {

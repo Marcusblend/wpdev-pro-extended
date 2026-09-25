@@ -18,6 +18,16 @@ final class FontItems
     public const CONFIG_KEYS = ['googleSubsets', 'typekitKitID', 'googleDisabled', 'googleFontsURL', 'fontDisplay', 'customFontItems', 'customFontFaceCSS'];
     public const FONT_DISPLAY = ['auto', 'block', 'swap', 'fallback', 'optional'];
 
+    /**
+     * The keys Cornerstone 7.9.4 reads from a custom font item
+     * (GlobalFonts::resolveFontDefinition(), make_custom_font_css(),
+     * locateCustomItem()); stored items may carry others, which a merge keeps.
+     */
+    public const CUSTOM_ITEM_KEYS = ['_id', 'family', 'stack', 'fallback', 'files'];
+
+    /** CSS generic families, which an @font-face rule cannot declare. */
+    private const GENERIC_FAMILIES = ['serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif', 'ui-monospace', 'ui-rounded', 'emoji', 'math', 'fangsong', 'inherit', 'initial', 'unset'];
+
     // Cornerstone's own system font data uses "400italic" as well as "400i".
     private const WEIGHT_SELECTION_PATTERN = '/^[1-9]00(?:i|italic)?$/';
     private const WEIGHT_PATTERN = '/^[1-9]00$/';
@@ -247,10 +257,14 @@ final class FontItems
     /**
      * Merge a partial config into the stored config.
      *
+     * normalized lists what was changed on the way in (a custom item's stack
+     * split into stack and fallback), and warnings what Cornerstone will do
+     * with a value that is stored as given.
+     *
      * @param  array<string, mixed> $stored
      * @param  array<string, mixed> $update
      * @param  string[]             $errors
-     * @return array{config: array<string, mixed>, changed: string[]}
+     * @return array{config: array<string, mixed>, changed: string[], normalized: array<int, array<string, mixed>>, warnings: string[]}
      */
     public static function mergeConfig(array $stored, array $update, array &$errors): array
     {
@@ -258,10 +272,12 @@ final class FontItems
 
         if ($unknown !== []) {
             $errors[] = sprintf('config has unknown keys: %s (allowed: %s).', implode(', ', $unknown), implode(', ', self::CONFIG_KEYS));
-            return ['config' => $stored, 'changed' => []];
+            return ['config' => $stored, 'changed' => [], 'normalized' => [], 'warnings' => []];
         }
 
         $config = $stored;
+        $normalized = [];
+        $warnings = [];
 
         foreach ($update as $key => $value) {
             switch ($key) {
@@ -322,7 +338,7 @@ final class FontItems
                     break;
 
                 case 'customFontItems':
-                    $merged = self::mergeCustomFontItems((array) ($stored['customFontItems'] ?? []), $value, $errors);
+                    $merged = self::mergeCustomFontItems((array) ($stored['customFontItems'] ?? []), $value, $errors, $normalized, $warnings);
 
                     if ($merged !== null) {
                         $config[$key] = $merged;
@@ -353,15 +369,17 @@ final class FontItems
             }
         }
 
-        return ['config' => $config, 'changed' => $changed];
+        return ['config' => $config, 'changed' => $changed, 'normalized' => $normalized, 'warnings' => $warnings];
     }
 
     /**
-     * @param  array<int, mixed> $stored
-     * @param  string[]          $errors
+     * @param  array<int, mixed>                 $stored
+     * @param  string[]                          $errors
+     * @param  array<int, array<string, mixed>>  $normalized
+     * @param  string[]                          $warnings
      * @return array<int, mixed>|null
      */
-    private static function mergeCustomFontItems(array $stored, mixed $items, array &$errors): ?array
+    private static function mergeCustomFontItems(array $stored, mixed $items, array &$errors, array &$normalized, array &$warnings): ?array
     {
         if (! is_array($items) || ! array_is_list($items)) {
             $errors[] = 'config.customFontItems must be a list.';
@@ -385,10 +403,10 @@ final class FontItems
                 continue;
             }
 
-            $unknown = array_diff(array_map('strval', array_keys($item)), ['_id', 'family', 'stack', 'files']);
+            $unknown = array_diff(array_map('strval', array_keys($item)), self::CUSTOM_ITEM_KEYS);
 
             if ($unknown !== []) {
-                $errors[] = sprintf('%s has unknown keys: %s (allowed: _id, family, stack, files).', $label, implode(', ', $unknown));
+                $errors[] = sprintf('%s has unknown keys: %s (allowed: %s).', $label, implode(', ', $unknown), implode(', ', self::CUSTOM_ITEM_KEYS));
                 continue;
             }
 
@@ -409,8 +427,13 @@ final class FontItems
                 continue;
             }
 
-            if (isset($item['stack']) && (! is_string($item['stack']) || preg_match(self::CSS_VALUE_FORBIDDEN, $item['stack']))) {
+            if (array_key_exists('stack', $item) && (! is_string($item['stack']) || preg_match(self::CSS_VALUE_FORBIDDEN, $item['stack']))) {
                 $errors[] = $label . '.stack must be a CSS font list without ; { } < >.';
+                continue;
+            }
+
+            if (array_key_exists('fallback', $item) && (! is_string($item['fallback']) || strlen($item['fallback']) > 300 || preg_match(self::CSS_VALUE_FORBIDDEN, $item['fallback']) || ! self::quotesClosed($item['fallback']))) {
+                $errors[] = $label . '.fallback must be a CSS font list without ; { } < > or line breaks, such as "sans-serif".';
                 continue;
             }
 
@@ -418,16 +441,224 @@ final class FontItems
                 continue;
             }
 
+            $merged = $exists && is_array($result[$index[$item['_id']]]) ? array_merge($result[$index[$item['_id']]], $item) : $item;
+            $before = count($errors);
+            $merged = self::normalizeCustomStack($merged, $label, $errors, $normalized);
+
+            if (count($errors) !== $before) {
+                continue;
+            }
+
+            self::warnRangeWeights($merged, $label, $warnings);
+
             if ($exists) {
-                $position = $index[$item['_id']];
-                $result[$position] = array_merge(is_array($result[$position]) ? $result[$position] : [], $item);
+                $result[$index[$item['_id']]] = $merged;
             } else {
-                $result[] = $item;
+                $result[] = $merged;
                 $index[$item['_id']] = count($result) - 1;
             }
         }
 
         return $result;
+    }
+
+    /**
+     * Make a custom item's stack the one quoted family its @font-face needs.
+     *
+     * make_custom_font_css() prints the stack (or, without one, the family)
+     * as the @font-face font-family verbatim, so a list such as
+     * "Brand Sans", Arial gives an invalid rule and the font never loads.
+     * resolveFontDefinition() appends the item's fallback to the stack for
+     * elements, so the rest of a list belongs there: the first family stays
+     * as the stack and the others are appended to the fallback, without
+     * repeats. An unquoted single family is quoted. A list whose first
+     * family is empty, or a generic family, is refused.
+     *
+     * @param  array<string, mixed>              $item The item after merging.
+     * @param  string[]                          $errors
+     * @param  array<int, array<string, mixed>>  $normalized
+     * @return array<string, mixed>
+     */
+    public static function normalizeCustomStack(array $item, string $label, array &$errors, array &$normalized): array
+    {
+        if (! array_key_exists('stack', $item) || ! is_string($item['stack'])) {
+            return $item;
+        }
+
+        $id = (string) ($item['_id'] ?? '?');
+        $stack = $item['stack'];
+
+        if (! self::quotesClosed($stack)) {
+            $errors[] = sprintf('%s.stack has a quote that is never closed: "%s".', $label, $stack);
+            return $item;
+        }
+
+        $parts = self::splitFontList($stack);
+        $first = $parts[0] ?? '';
+        $quoted = preg_match('/^(?:"[^"]+"|\'[^\']+\')$/', $first) === 1;
+
+        if ($first === '' || (! $quoted && ! preg_match('/^[A-Za-z_][\w -]*$/', $first))) {
+            $errors[] = sprintf('%s.stack must begin with the font\'s own family name in quotes, which the @font-face rule declares (for example \'"%s"\'); "%s" does not.', $label, (string) ($item['family'] ?? 'Brand Sans'), $stack);
+            return $item;
+        }
+
+        if (! $quoted && in_array(strtolower($first), self::GENERIC_FAMILIES, true)) {
+            $errors[] = sprintf('%s.stack is the generic family "%s", which an @font-face rule cannot declare; use the font\'s own family name, quoted, and put "%s" in fallback.', $label, $first, $first);
+            return $item;
+        }
+
+        $family = $quoted ? $first : '"' . $first . '"';
+
+        if ($family !== $stack) {
+            $normalized[] = [
+                'item'   => $id,
+                'key'    => 'stack',
+                'from'   => $stack,
+                'to'     => $family,
+                'reason' => count($parts) > 1
+                    ? 'Cornerstone prints the stack as the @font-face font-family, which takes one family; the rest moved to fallback, which Cornerstone appends for elements.'
+                    : 'Quoted, so the @font-face font-family is read as one name.',
+            ];
+            $item['stack'] = $family;
+        }
+
+        if (count($parts) > 1) {
+            $was = isset($item['fallback']) && is_string($item['fallback']) ? $item['fallback'] : null;
+            $fallback = self::splitFontList((string) $was);
+            $seen = array_map(static fn (string $part): string => self::familyKey($part), $fallback);
+
+            foreach (array_slice($parts, 1) as $part) {
+                if ($part !== '' && ! in_array(self::familyKey($part), $seen, true) && self::familyKey($part) !== self::familyKey($family)) {
+                    $fallback[] = $part;
+                    $seen[] = self::familyKey($part);
+                }
+            }
+
+            $now = implode(', ', array_values(array_filter($fallback, static fn (string $part): bool => $part !== '')));
+
+            if ($now !== ($was ?? '')) {
+                $normalized[] = ['item' => $id, 'key' => 'fallback', 'from' => $was, 'to' => $now, 'reason' => 'The families after the first in stack, appended after the fallback already set.'];
+                $item['fallback'] = $now;
+            }
+        }
+
+        return $item;
+    }
+
+    /**
+     * A CSS font list split on the commas outside quotes, each part trimmed.
+     *
+     * @return string[]
+     */
+    public static function splitFontList(string $list): array
+    {
+        if (trim($list) === '') {
+            return [];
+        }
+
+        $parts = [];
+        $current = '';
+        $quote = null;
+
+        foreach (str_split($list) as $char) {
+            if ($quote !== null) {
+                $current .= $char;
+
+                if ($char === $quote) {
+                    $quote = null;
+                }
+
+                continue;
+            }
+
+            if ($char === '"' || $char === "'") {
+                $quote = $char;
+                $current .= $char;
+                continue;
+            }
+
+            if ($char === ',') {
+                $parts[] = trim($current);
+                $current = '';
+                continue;
+            }
+
+            $current .= $char;
+        }
+
+        $parts[] = trim($current);
+
+        return $parts;
+    }
+
+    /**
+     * Whether every quote in a CSS font list is closed.
+     */
+    public static function quotesClosed(string $list): bool
+    {
+        $quote = null;
+
+        foreach (str_split($list) as $char) {
+            if ($quote === null && ($char === '"' || $char === "'")) {
+                $quote = $char;
+            } elseif ($char === $quote) {
+                $quote = null;
+            }
+        }
+
+        return $quote === null;
+    }
+
+    private static function familyKey(string $family): string
+    {
+        return strtolower(trim($family, " \t\"'"));
+    }
+
+    /**
+     * Warn when a custom item's weights are all ranges.
+     *
+     * Variable fonts: make_custom_font_css() prints files[].weight verbatim as
+     * the @font-face font-weight, so a range such as "100 900" is emitted as
+     * a valid range and the browser uses the file for every weight in it. That
+     * is why a range is accepted and stored untouched. But Cornerstone resolves
+     * "fw-normal", "fw-bold" and numeric weights against the files' weights
+     * with intval() (getClosestWeight()), so a range counts as its lower end
+     * and fw-normal would render 100. Listing the same file again under each
+     * weight the site references ("400", "700") gives those rules too, and the
+     * resolution the numbers it needs.
+     *
+     * Cornerstone's @font-face has no font-stretch descriptor, and
+     * config.customFontFaceCSS is stored but never printed by Cornerstone
+     * 7.9.4's PHP, so a width axis is not written anywhere here; its
+     * @font-face (with a font-stretch range) goes in Global CSS.
+     *
+     * @param array<string, mixed> $item
+     * @param string[]             $warnings
+     */
+    private static function warnRangeWeights(array $item, string $label, array &$warnings): void
+    {
+        $ranges = [];
+        $numbers = [];
+
+        foreach ((array) ($item['files'] ?? []) as $file) {
+            $weight = is_array($file) ? (string) ($file['weight'] ?? '') : '';
+
+            if (str_contains($weight, ' ')) {
+                $ranges[] = $weight;
+            } elseif ($weight !== '') {
+                $numbers[] = $weight;
+            }
+        }
+
+        if ($ranges !== [] && $numbers === []) {
+            $warnings[] = sprintf(
+                '%s ("%s") only has range weights (%s). Cornerstone prints the range in @font-face as given, but it resolves "fw-normal", "fw-bold" and numeric weights with the lower end of a range, so fw-normal renders %s. Add the same file again under each weight the site uses, for example {"weight": "400"} and {"weight": "700"}.',
+                $label,
+                (string) ($item['_id'] ?? '?'),
+                implode(', ', array_unique($ranges)),
+                (string) (int) $ranges[0]
+            );
+        }
     }
 
     /**
@@ -455,8 +686,8 @@ final class FontItems
                 return false;
             }
 
-            if (! isset($file['weight']) || ! is_string($file['weight']) || ! preg_match(self::WEIGHT_PATTERN, $file['weight'])) {
-                $errors[] = $fileLabel . '.weight must be a weight such as "400".';
+            if (! isset($file['weight']) || ! is_string($file['weight']) || ! self::validFileWeight($file['weight'])) {
+                $errors[] = $fileLabel . '.weight must be a weight such as "400", or for a variable font a range such as "100 900".';
                 return false;
             }
 
@@ -482,6 +713,23 @@ final class FontItems
         }
 
         return true;
+    }
+
+    /**
+     * A file weight: "400", or a variable font's range "100 900" (1 to 1000,
+     * low to high), which Cornerstone prints in @font-face as given.
+     */
+    public static function validFileWeight(string $weight): bool
+    {
+        if (preg_match(self::WEIGHT_PATTERN, $weight)) {
+            return true;
+        }
+
+        if (! preg_match('/^([1-9]\d{0,3}) ([1-9]\d{0,3})$/', $weight, $match)) {
+            return false;
+        }
+
+        return (int) $match[1] < (int) $match[2] && (int) $match[2] <= 1000;
     }
 
     /**
