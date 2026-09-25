@@ -10,13 +10,22 @@ use ProExtended\Support\Json;
 /**
  * Finds where a site uses global palette colors or global fonts.
  *
- * References look like "global-color:<id>" (optionally with ":<alpha>"),
- * "global-ff:<id>", "global-fw:<id>|fw-bold", Dynamic Content tokens such
- * as {{dc:global:color id="<id>"}}, the Twig forms global.color({id: '<id>'})
- * and '<id>'|cs_font_family, and, for fonts, the bare ID stored in a
- * "*_font_family*" key. Cornerstone renders a missing color as transparent
- * and a missing font as the browser default, so a removal is refused while
- * any of these remain (unless forced).
+ * Colours are referenced as "global-color:<id>" (optionally with
+ * ":<alpha>"), Dynamic Content tokens such as {{dc:global:color id="<id>"}}
+ * and the Twig form global.color({id: '<id>'}).
+ *
+ * A font is referenced by its bare `_id`, which is the form Cornerstone
+ * resolves: an element's *_font_family key (and its _alt and _bp_data
+ * values), a theme option's *_font_family_selection, a typography
+ * parameter's fontFamily, a parameter whose schema (_p_json, or
+ * cs_global_parameter_json for Global Parameters) gives it the type
+ * "font-family", and that schema's own initial value ("font-family|<id>" or
+ * {"type": "font-family", "initial": "<id>"}). The legacy "global-ff:<id>"
+ * and "global-fw:<id>|fw-bold" forms are still found, since stored content
+ * may hold them, as are the {{dc:global:font id="<id>"}} tokens and the
+ * '<id>'|cs_font_family Twig filter. Cornerstone renders a missing color as
+ * transparent and a missing font as the browser default, so a removal is
+ * refused while any of these remain (unless forced).
  *
  * The matching is plain PHP (unit-tested); scan() reads the site.
  */
@@ -64,11 +73,20 @@ final class ReferenceScanner
     /**
      * References to an ID in decoded data: every string, plus (for fonts)
      * bare IDs stored under font family keys.
+     *
+     * A string holding a JSON object or list (a _p_json schema, say) is
+     * decoded and read the same way, so the keys inside it count too.
+     *
+     * @param string[] $fontNames Keys at this level that hold a font family
+     *                            (the font-family parameters a schema declares).
      */
-    public static function countInData(mixed $data, string $kind, string $id, bool $fontKey = false): int
+    public static function countInData(mixed $data, string $kind, string $id, bool $fontKey = false, array $fontNames = []): int
     {
         if (is_string($data)) {
-            return ($fontKey && $kind === self::KIND_FONT && $data === $id ? 1 : 0) + self::countInText($data, $kind, $id);
+            $isId = $fontKey && $kind === self::KIND_FONT && $data === $id ? 1 : 0;
+            $nested = self::nestedJson($data, $id);
+
+            return $isId + ($nested !== null ? self::countInData($nested, $kind, $id) : self::countInText($data, $kind, $id));
         }
 
         if (! is_array($data)) {
@@ -77,12 +95,84 @@ final class ReferenceScanner
 
         $count = 0;
 
+        // A parameter schema entry in full form: {"type": "font-family", "initial": "<id>"}.
+        if ($kind === self::KIND_FONT && ($data['type'] ?? null) === 'font-family' && ($data['initial'] ?? null) === $id) {
+            $count++;
+        }
+
+        // An element that declares its parameters and their values together.
+        $parameterFonts = $kind === self::KIND_FONT && isset($data['_p_json'], $data['_p_data']) ? self::fontParameters($data['_p_json']) : [];
+
         foreach ($data as $key => $value) {
-            $isFontKey = $fontKey || (is_string($key) && str_contains($key, 'font_family'));
-            $count += self::countInData($value, $kind, $id, $isFontKey);
+            $key = (string) $key;
+            $isFontKey = $fontKey || self::isFontFamilyKey($key) || in_array($key, $fontNames, true);
+            $names = match (true) {
+                $key === '_p_data'                  => $parameterFonts,
+                str_starts_with($key, '_bp_data')   => $fontNames,
+                default                             => [],
+            };
+
+            $count += self::countInData($value, $kind, $id, $isFontKey, $names);
         }
 
         return $count;
+    }
+
+    /**
+     * Whether a key holds a font family: an element's *_font_family, a theme
+     * option's *_font_family_selection, a typography parameter's fontFamily.
+     */
+    public static function isFontFamilyKey(string $key): bool
+    {
+        return preg_match('/font[_-]?family/i', $key) === 1;
+    }
+
+    /**
+     * The parameters a schema (_p_json or cs_global_parameter_json, as a
+     * JSON string or decoded) gives the type "font-family".
+     *
+     * @return string[]
+     */
+    public static function fontParameters(mixed $schema): array
+    {
+        if (is_string($schema)) {
+            $decoded = json_decode($schema, true);
+            $schema = is_array($decoded) ? $decoded : json_decode(stripslashes($schema), true);
+        }
+
+        if (! is_array($schema)) {
+            return [];
+        }
+
+        $names = [];
+
+        foreach ($schema as $name => $entry) {
+            $type = is_array($entry) ? ($entry['type'] ?? null) : (is_string($entry) ? explode('|', $entry, 2)[0] : null);
+
+            if ($type === 'font-family' && is_string($name) && $name !== '') {
+                $names[] = $name;
+            }
+        }
+
+        return $names;
+    }
+
+    /**
+     * A string that holds a JSON object or list mentioning the ID, decoded.
+     *
+     * @return array<mixed>|null
+     */
+    private static function nestedJson(string $text, string $id): ?array
+    {
+        $trimmed = ltrim($text);
+
+        if ($trimmed === '' || ($trimmed[0] !== '{' && $trimmed[0] !== '[') || ! str_contains($text, $id)) {
+            return null;
+        }
+
+        $decoded = json_decode($text, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     /**
@@ -102,9 +192,15 @@ final class ReferenceScanner
         }
 
         return [
+            // Legacy forms that stored content may still hold.
             '/global-f[fw]:' . $q . '(?![\w-])/',
             '/\{\{dc:(?:global|site):font(?:-family|-weight)?\b[^}]*?\bid=' . $quote . $q . $quote . '/i',
             '/' . $quote . $q . '(?:\|[\w-]+)?' . $quote . '\s*\|\s*cs_font_(?:family|weight)/',
+            // A parameter schema's shorthand initial value: "font-family|<id>".
+            '/(?<![\w-])font-family\|' . $q . '(?![\w-])/',
+            // A font family key holding the bare ID, in JSON text that could
+            // not be decoded: "text_font_family":"<id>".
+            '/' . $quote . '[\w-]*font[_-]?family[\w-]*' . $quote . '\s*:\s*' . $quote . $q . $quote . '/i',
         ];
     }
 
@@ -153,9 +249,21 @@ final class ReferenceScanner
             }
         }
 
-        foreach ($this->optionValues() as $option => $value) {
+        $options = $this->optionValues();
+
+        // Global Parameters keep their schema and values in two options; a
+        // value is a font reference when the schema types it font-family.
+        $globalFonts = $kind === self::KIND_FONT ? self::fontParameters(Json::decodeStored($options[GlobalParameters::JSON_OPTION] ?? null) ?? ($options[GlobalParameters::JSON_OPTION] ?? null)) : [];
+
+        foreach ($options as $option => $value) {
+            if ($option === GlobalParameters::DATA_OPTION && $globalFonts !== []) {
+                $value = Json::decodeStored($value) ?? $value;
+            }
+
             foreach ($ids as $id) {
-                $count = self::countInData([$option => $value], $kind, $id);
+                $count = $option === GlobalParameters::DATA_OPTION && $globalFonts !== [] && is_array($value)
+                    ? self::countInData($value, $kind, $id, false, $globalFonts)
+                    : self::countInData([$option => $value], $kind, $id);
 
                 if ($count > 0) {
                     $this->add($uses[$id], ['type' => 'option', 'option' => $option, 'count' => $count]);

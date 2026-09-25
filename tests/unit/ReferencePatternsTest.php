@@ -48,6 +48,53 @@ T::same(1, R::countInData(['value' => ['type' => 'linear', 'colors' => [['color'
 T::same(0, R::countInData(null, $c, 'brand'), 'null data');
 T::same(0, R::countInText('', $c, 'brand'), 'empty text');
 
+// Fonts by bare _id, the form Cornerstone resolves -----------------------------
+
+$bare = [
+    '_type'                              => 'button',
+    'anchor_text_primary_font_family'    => 'serif1',
+    'anchor_text_primary_font_family_alt' => 'serif1',
+    'anchor_text_primary_font_weight'    => 'fw-bold',
+    'anchor_text_secondary_font_family'  => 'serif10',
+    'anchor_text_content'                => 'serif1',
+    '_bp_data4_4'                        => ['anchor_text_primary_font_family' => [null, null, 'serif1', null, null]],
+];
+T::same(3, R::countInData($bare, $f, 'serif1'), 'a bare _id under *_font_family, its _alt twin and a breakpoint value; not in copy, not a longer id');
+
+foreach (file(dirname(__DIR__) . '/fixtures/cornerstone-7.9.4/font-theme-options.txt', FILE_IGNORE_NEW_LINES) ?: [] as $row) {
+    if ($row === '' || $row[0] === '#') {
+        continue;
+    }
+
+    [$option, $kind] = explode("\t", $row);
+
+    if ($kind === 'family') {
+        T::same(1, R::countInData([$option => 'serif1'], $f, 'serif1'), "{$option} holding the bare _id is a use");
+        T::same(1, R::countInData([$option => 'global-ff:serif1'], $f, 'serif1'), "{$option} holding the legacy global-ff: form still is");
+    } else {
+        T::same(0, R::countInData([$option => 'fw-bold'], $f, 'serif1'), "{$option} holding fw-bold names no font");
+    }
+}
+
+$component = [
+    '_type'   => 'layout-div',
+    '_p_json' => '{"heading":"font-family|serif1","body":{"type":"font-family","initial":"sans1"},"label":"text|serif1","typo":{"type":"typography"}}',
+    '_p_data' => ['heading' => 'serif1', 'body' => 'serif1', 'label' => 'serif1', 'typo' => ['fontFamily' => 'serif1', 'fontWeight' => 'fw-bold']],
+];
+T::same(4, R::countInData($component, $f, 'serif1'), 'the schema\'s shorthand initial, font-family parameters, and a typography fontFamily; not a text parameter');
+T::same(1, R::countInData($component, $f, 'sans1'), 'a schema initial in full form');
+T::same(['heading', 'body'], R::fontParameters($component['_p_json']), 'fontParameters reads both schema forms');
+T::same(['brandFont'], R::fontParameters(['brandFont' => 'font-family|serif1', 'x' => ['type' => 'color']]), 'and a decoded schema');
+
+$instance = ['_type' => 'component', 'component_id' => 'c1', '_p_data' => ['font' => 'serif1', 'heading_font_family' => 'serif1']];
+T::same(1, R::countInData($instance, $f, 'serif1'), 'an instance\'s _p_data counts where the name says font family (the schema lives in the component)');
+
+T::same(1, R::countInData(['data' => '{"text_font_family":"serif1","text_content":"serif1"}'], $f, 'serif1'), 'a JSON string is decoded and read the same way');
+T::same(1, R::countInText('{\"text_font_family\":\"serif1\"', $f, 'serif1'), 'undecodable JSON text still shows a font key holding the id');
+T::same(0, R::countInText('{"text_content":"serif1"}', $f, 'serif1'), 'but not another key');
+T::same(2, R::countInData(['brandFont' => 'serif1', '_bp_data4_4' => ['brandFont' => [null, 'serif1']]], $f, 'serif1', false, ['brandFont']), 'Global Parameters data: names from the schema count at the top level and per breakpoint');
+T::same(0, R::countInData(['brandFont' => 'serif1'], $f, 'serif1'), 'and without the schema a parameter name alone is not a font key');
+
 $uses = [
     'brand' => ['count' => 3, 'locations' => [
         ['type' => 'post', 'post_id' => 12, 'post_type' => 'page', 'title' => 'T', 'field' => '_cornerstone_data', 'count' => 2],
