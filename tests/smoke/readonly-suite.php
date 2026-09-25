@@ -53,7 +53,7 @@ S::check(isset($tools['get_theme_options']) && ($tools['get_theme_options']['ann
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 
 $init = S::rpc('initialize', ['protocolVersion' => '2025-03-26', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pe-smoke', 'version' => '1']]);
-S::check(($init['result']['serverInfo']['version'] ?? null) === '1.5.0' && ($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'initialize reports 1.5.0 and protocol 2025-03-26');
+S::check(($init['result']['serverInfo']['version'] ?? null) === '1.5.1' && ($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'initialize reports 1.5.1 and protocol 2025-03-26');
 S::check(pro_extended()->mcpServer()->getRegistrationErrors() === [], 'no tool failed to register');
 
 // 19. Site info and listings -------------------------------------------------
@@ -62,7 +62,7 @@ S::section('19 site info and listings');
 
 $info = S::ok(S::call('get_site_info'), 'get_site_info');
 $health = (array) ($info['health'] ?? []);
-S::check(($info['pro_extended']['version'] ?? null) === '1.5.0', 'reports 1.5.0');
+S::check(($info['pro_extended']['version'] ?? null) === '1.5.1', 'reports 1.5.1');
 S::check(isset($health['permalinks'], $health['cornerstone_adapter'], $health['component_registry'], $health['host_cache'], $health['settings']), 'returns the health block', (string) wp_json_encode(array_keys($health)));
 S::check(($health['cornerstone_available'] ?? null) === true, 'Cornerstone is available');
 S::check(($health['permalinks']['pretty'] ?? null) === true && ($health['application_passwords_in_use'] ?? null) === true, 'pretty permalinks and application passwords are in use');
