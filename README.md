@@ -206,7 +206,7 @@ Commands that write (`wp pe layout import`, and `wp pe mcp call` for any tool th
 
 ### Building natively
 
-Pro Extended exists so a model can build a site with Cornerstone's own features. The handshake instructions give it an order to work in: the element's own setting (`get_element_schema`), a global reference in that setting (`global-color:`, `global-ff:`, a Global Variable), components and Global Parameters, Dynamic Content and Twig, conditions, loopers, native elements and effects, and only then Global CSS or Global JS. A site build never ships PHP, a plugin, an mu-plugin, `functions.php` code, a custom shortcode or `wp_head` output. `get_native_reference` reads what the site's Cornerstone offers, `pe://guide/native` holds worked recipes, and the `custom-shortcode`, `hardcoded-date` and `html-in-text` warnings catch builds that drift off the native path.
+Pro Extended exists so a model can build a site with Cornerstone's own features. The handshake instructions give it an order to work in: the element's own setting (`get_element_schema`), a global reference in that setting (`global-color:<_id>`, a font's bare `_id` with the weight `fw-normal` or `fw-bold`, a Global Variable), components and Global Parameters, Dynamic Content and Twig, conditions, loopers, native elements and effects, and only then Global CSS or Global JS. A site build never ships PHP, a plugin, an mu-plugin, `functions.php` code, a custom shortcode or `wp_head` output. `get_native_reference` reads what the site's Cornerstone offers, `pe://guide/native` holds worked recipes, and the `custom-shortcode`, `hardcoded-date` and `html-in-text` warnings catch builds that drift off the native path.
 
 The plugin itself adds nothing to the front end: it registers a REST route and WP-CLI commands, and every option it owns is tooling state that nothing reads while a page renders.
 
@@ -215,7 +215,7 @@ The plugin itself adds nothing to the front end: it registers a REST route and W
 | Tool | Type | Description |
 |------|------|-------------|
 | `get_site_info` | Read | Versions, breakpoints, active plugins, a `features` block (content storage, Twig, External API, CSV, WPML, WooCommerce, ACF, Max products, your Cornerstone permissions) and a `health` block |
-| `get_native_reference` | Read | What this site's Cornerstone offers natively, by `section`: `dynamic_content`, `twig`, `conditions`, `loopers`, `parameter_types`, `regions` |
+| `get_native_reference` | Read | What this site's Cornerstone offers natively, by `section`: `dynamic_content`, `twig`, `conditions`, `loopers`, `parameter_types`, `regions`, `fonts` (each global font as Cornerstone resolves it, custom font items, and the exact reference forms) |
 | `list_dynamic_content` | Read | Deprecated alias of `get_native_reference` `section: "dynamic_content"` |
 | `list_elements` | Read | Element types with groups, valid children and valid parents |
 | `get_element_schema` | Read | An element's settings as the Inspector groups them, the keys each control writes, what the element emits and at what specificity (`format: "raw"` for the full definition) |
@@ -250,12 +250,12 @@ The plugin itself adds nothing to the front end: it registers a REST route and W
 | `restore_layout` | Write | Restore from a backup |
 | `create_menu` / `update_menu` | Write | Navigation menus, items, nesting, locations and anchor graphics |
 | `set_colors` | Write | Add, update or remove palette colors by `_id` (removal checks where each color is used) |
-| `set_fonts` | Write | Add, update or remove global fonts, including self-hosted custom fonts, and merge font settings |
+| `set_fonts` | Write | Add, update or remove global fonts, including self-hosted custom fonts (`stack` is the one quoted family, `fallback` the rest; a comma stack is split and reported), and merge font settings |
 | `set_variables` | Write | Cornerstone Global Variables (CSS custom properties), with per-breakpoint values |
 | `set_global_parameters` | Write | The site's global parameter schema and values |
 | `set_global_css` | Write | Named Global CSS blocks — the last resort for styling no setting covers |
 | `set_global_js` | Write | Named Global JS blocks — the home for the few lines of script a build cannot avoid |
-| `update_theme_options` | Write | Theme Options the way the panel writes them, including Twig and its templates (the Advanced PHP extension is refused) |
+| `update_theme_options` | Write | Theme Options the way the panel writes them, including Twig and its templates (the Advanced PHP extension is refused); font keys are normalised to a font's `_id` and `fw-normal`/`fw-bold`, and a family must exist in the Font Manager |
 | `set_api_allowlist` | Write | Add or remove External API allowlist entries (fails closed) |
 | `upload_media` | Write | Images and web fonts (and, when allowed, SVGs) from HTTPS URLs or base64 |
 | `restore_settings` | Write | Put back a settings backup |
@@ -301,7 +301,9 @@ Cornerstone gives every element it creates two markers: `_m` (`{"e": N}`, the el
 | `background-layers-off` | Background layers whose advanced switch is off |
 | `unknown-element`, `invalid-child`, `component-instance` | The structural warnings of earlier versions |
 | `css-over-control` | A `css` declaration sets a property the element has a setting for |
-| `literal-color`, `literal-font-family` | A literal colour or font stack where a global reference belongs (checks `_alt` and `_bp_data` too) |
+| `literal-color`, `literal-font-family` | A literal colour or font stack where a global reference belongs (checks `_alt` and `_bp_data` too); a font's bare `_id` is a reference |
+| `font-ref-prefix` | A font family or weight written with a `global-ff:` or `global-fw:` prefix, which renders the fallback font or `inherit`; the message gives the bare `_id` or `fw-normal`/`fw-bold` to write |
+| `font-weight-shape` | A font weight with the family joined to it (`body\|fw-normal`), which renders `inherit`; the message gives the weight on its own |
 | `twig-syntax`, `twig-off` | Twig that does not parse with the site's environment, or Twig on a site where it is off |
 | `custom-shortcode` | A shortcode whose callback lives outside WordPress core, Pro/Cornerstone and Themeco extensions |
 | `hardcoded-date` | A typed copyright year or promo date that will go stale |
@@ -309,15 +311,15 @@ Cornerstone gives every element it creates two markers: `_m` (`{"e": N}`, the el
 
 #### Removing palette colors and fonts
 
-`set_colors` and `set_fonts` accept `remove` (entry or group IDs). Each removed entry is first looked up in page element data and settings, header/footer/layout/component documents, templates, theme options (Global CSS, variables and global parameters included) and other palette entries. An entry still in use is only removed with `force: true`; the response lists every use. Removing a group keeps its members, and the last font cannot be removed.
+`set_colors` and `set_fonts` accept `remove` (entry or group IDs). Each removed entry is first looked up in page element data and settings, header/footer/layout/component documents, templates, theme options (Global CSS, variables and global parameters included) and other palette entries. A font is found by its bare `_id` in font family keys, the `*_font_family_selection` theme options and font-family parameters, and in the legacy `global-ff:`/`global-fw:` forms that older content may hold. An entry still in use is only removed with `force: true`; the response lists every use. Removing a group keeps its members, and the last font cannot be removed.
 
 #### References in layout data
 
 | Reference | Format |
 |-----------|--------|
 | Global color | `global-color:<_id>`, with alpha `global-color:<_id>:0.33` |
-| Global font family | `global-ff:<_id>` |
-| Global font weight | `global-fw:<_id>\|fw-normal` or `global-fw:<_id>\|fw-bold` |
+| Global font family | The font's bare `_id`: `"text_font_family": "body"` (Theme Options: `"x_body_font_family_selection": "body"`) |
+| Global font weight | `fw-normal` or `fw-bold` on its own: `"text_font_weight": "fw-bold"` (Theme Options: `"x_body_font_weight_selection": "fw-normal"`); Cornerstone adds the family |
 | Image | `<attachment_id>:full` (`upload_media` returns it as `cs_ref`) |
 | Menu | `menu:<term_id>` (`list_menus` returns it as `cs_ref`) |
 | Component instance | `{"_type": "component", "component_id": "<_c_id>", "_p_data": {...}}` (IDs from `list_components`) |

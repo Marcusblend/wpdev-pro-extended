@@ -139,13 +139,15 @@ The keys come from Cornerstone 7.9.4. Before you write one, confirm it on the si
 
 ### Self-hosted fonts
 - **Need:** brand fonts served from the site, with no `@font-face` in custom code.
-- **Native:** Cornerstone's custom fonts, which write the `@font-face` rules themselves.
+- **Native:** Cornerstone's custom fonts, which write the `@font-face` rules themselves, and a global font that points at one.
 - **Write:** first upload_media the `.woff2` files. Then run set_fonts with `dry_run: true`:
   ```json
-  {"config": {"customFontItems": [{"_id": "brand-sans", "family": "Brand Sans", "stack": "\"Brand Sans\", sans-serif", "files": [{"weight": "400", "style": "normal", "filename": "brand-sans-400.woff2", "url": "/wp-content/uploads/2026/09/brand-sans-400.woff2", "id": 123}]}]}, "fonts": [{"_id": "body", "title": "Body", "family": "Brand Sans", "source": "custom"}], "dry_run": true}
+  {"config": {"customFontItems": [{"_id": "brand-sans", "family": "Brand Sans", "stack": "\"Brand Sans\"", "fallback": "sans-serif", "files": [{"weight": "400", "style": "normal", "filename": "brand-sans-400.woff2", "url": "/wp-content/uploads/2026/09/brand-sans-400.woff2", "id": 123}, {"weight": "700", "style": "normal", "filename": "brand-sans-700.woff2", "url": "/wp-content/uploads/2026/09/brand-sans-700.woff2", "id": 124}]}]}, "fonts": [{"_id": "body", "title": "Body", "family": "Brand Sans", "source": "custom"}], "dry_run": true}
   ```
-  Reference the font as `"global-ff:body"` and `"global-fw:body|fw-normal"`.
-- **Verify:** list_fonts shows the font with source `custom`. validate_layout reports `literal-font-family` wherever a stack was typed instead.
+  Cornerstone prints the custom item's `stack` as the `@font-face` family, so it holds the one quoted family. Other families go in `fallback`, which Cornerstone adds after the stack for elements. The global font `body` points at the custom item by `family`.
+  Reference the global font by its `_id` on its own, and the weight on its own. An element gets `{"text_font_family": "body", "text_font_weight": "fw-normal"}`. Theme Options get update_theme_options `{"options": {"x_body_font_family_selection": "body", "x_body_font_weight_selection": "fw-normal"}}`.
+  **Variable fonts:** give the one file a weight range, `{"weight": "100 900"}`, which Cornerstone prints in `@font-face` as it is. List the same file again under `"400"` and `"700"`, because Cornerstone matches `"fw-normal"`, `"fw-bold"` and numeric weights against the listed weights and reads a range as its lower end. Cornerstone writes no font-stretch descriptor, and it stores `customFontFaceCSS` without printing it. For a width axis, add an `@font-face` with a font-stretch range in Global CSS (set_global_css), then set font-stretch in the element's `css` (`$el { font-stretch: 75%; }`) or a Global CSS rule.
+- **Verify:** get_native_reference section "fonts" lists `body` with the stack `"Brand Sans", sans-serif`, and the custom item with the `font_face_family` `"Brand Sans"`. validate_layout reports `literal-font-family` where a stack was typed, `font-ref-prefix` for a family or weight written with a prefix, and `font-weight-shape` for a weight with the family joined to it.
 
 ### Background textures
 - **Need:** a paper or grain texture behind sections.

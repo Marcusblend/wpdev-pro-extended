@@ -163,15 +163,16 @@ T::ok(! str_contains($guide, 'get_option('), 'no recipe relies on the Advanced T
 // Element keys in the JSON the guide writes were each confirmed in source.
 // Tool arguments and example names are listed here rather than in the fixture.
 $notElementKeys = [
-    'json', 'data', 'config', 'customFontItems', '_id', 'family', 'stack', 'files', 'weight', 'style', 'filename',
-    'url', 'id', 'fonts', 'title', 'source', 'dry_run', 'variables', 'type', 'params',
+    'json', 'data', 'config', 'customFontItems', '_id', 'family', 'stack', 'fallback', 'files', 'weight', 'style', 'filename',
+    'url', 'id', 'fonts', 'title', 'source', 'dry_run', 'variables', 'type', 'params', 'options',
     'promo_end', 'promo_pct', 'hours', 'day', 'open', 'texture-paper', 'telephone', 'scroll',
 ];
+$themeFontKeys = $fixture('font-theme-options.txt');
 preg_match_all('/"([A-Za-z_][A-Za-z0-9_-]*)"\s*:/', $guide, $jsonKeys);
 $unconfirmed = [];
 
 foreach (array_unique($jsonKeys[1]) as $key) {
-    if (! in_array($key, $settingKeys, true) && ! in_array($key, $notElementKeys, true)) {
+    if (! in_array($key, $settingKeys, true) && ! in_array($key, $notElementKeys, true) && ! in_array($key, $themeFontKeys, true)) {
         $unconfirmed[] = $key;
     }
 }
@@ -184,3 +185,52 @@ foreach (['accordion_item_starts_open', 'form_data-cs-ajax-selectors', 'bg_lower
 
 // Generic: no client, no site.
 T::ok(! preg_match('/https?:\/\/(?!schema\.org)/', $guide), 'the guide names no site');
+
+// Fonts (1.5.1): a family is the font's bare _id and a weight "fw-normal" or
+// "fw-bold". The old forms render the fallback font and inherit, so they
+// must never come back into the guide or the handshake.
+$handshake = (string) (new ReflectionClassConstant(Server::class, 'INSTRUCTIONS'))->getValue();
+
+foreach (['global-ff:', 'global-fw:'] as $wrong) {
+    T::ok(! str_contains($guide, $wrong), "the guide never writes {$wrong}");
+    T::ok(! str_contains($handshake, $wrong), "the handshake never writes {$wrong}");
+}
+
+T::ok(! preg_match('/"[A-Za-z][\w-]*\|fw-(?:normal|bold)"/', $guide . $handshake), 'nor a weight with the family joined to it');
+T::ok(str_contains($handshake, '"fw-normal" or "fw-bold"') && str_contains($handshake, '"text_font_family": "body"'), 'the handshake gives the bare _id and fw-normal/fw-bold forms');
+
+$fontRecipe = $byTitle['Self-hosted fonts'] ?? '';
+preg_match('/```json\n(.*?)```/s', $fontRecipe, $block);
+$call = json_decode(trim($block[1] ?? ''), true);
+T::ok(is_array($call), 'the self-hosted fonts call is valid JSON');
+
+$fontErrors = [];
+$fontConfig = \ProExtended\Settings\FontItems::mergeConfig([], (array) ($call['config'] ?? []), $fontErrors);
+T::same([], $fontErrors, 'its customFontItems pass set_fonts\' checks');
+T::same([], $fontConfig['normalized'], 'with a stack that needs no splitting');
+T::same([], $fontConfig['warnings'], 'and no warnings');
+$recipeItem = $fontConfig['config']['customFontItems'][0] ?? [];
+T::same(1, count(\ProExtended\Settings\FontItems::splitFontList((string) ($recipeItem['stack'] ?? ''))), 'the custom item\'s stack is one family');
+T::ok(($recipeItem['fallback'] ?? '') !== '', 'and the fallback is its own key');
+
+$recipeFont = (array) ($call['fonts'][0] ?? []);
+preg_match('/\{"text_font_family": "([^"]+)", "text_font_weight": "([^"]+)"\}/', $fontRecipe, $elementRef);
+T::same([$recipeFont['_id'] ?? null, 'fw-normal'], [$elementRef[1] ?? null, $elementRef[2] ?? null], 'the element reference is the global font\'s _id and fw-normal');
+
+$recipeLint = new ElementLint(new \ProExtended\Elements\LintContext(
+    styleKeys: static fn (string $type): array => ['text_font_family' => 'font-family', 'text_font_weight' => 'font-weight'],
+    fontIds: static fn (): array => [(string) ($recipeFont['_id'] ?? '')],
+));
+T::same([], array_column($recipeLint->tree([['_type' => 'text', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_font_family' => $elementRef[1] ?? '', 'text_font_weight' => $elementRef[2] ?? '']]), 'code'), 'and validate_layout has nothing to say about it');
+
+preg_match('/update_theme_options `(\{.*?\})`/', $fontRecipe, $themeCall);
+$themeOptions = (array) (json_decode($themeCall[1] ?? '', true)['options'] ?? []);
+$themePlan = \ProExtended\Settings\ThemeOptionsWriter::plan($themeOptions, $themeFontKeys, [], [(string) ($recipeFont['_id'] ?? '')]);
+T::same(['x_body_font_family_selection', 'x_body_font_weight_selection'], array_keys($themeOptions), 'the Theme Options example sets the body family and weight');
+T::same([], $themePlan['errors'], 'and update_theme_options accepts it');
+T::same([], $themePlan['normalized'], 'as written');
+
+foreach (['font-ref-prefix', 'font-weight-shape', 'literal-font-family'] as $code) {
+    T::ok(str_contains($fontRecipe, '`' . $code . '`'), "the fonts recipe names {$code}");
+}
+

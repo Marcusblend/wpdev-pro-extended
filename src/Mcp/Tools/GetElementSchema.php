@@ -22,7 +22,7 @@ final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
 
     public function description(): string
     {
-        return 'Get the settings a Cornerstone element type has, grouped the way the builder\'s Inspector groups them: tab, panel, label, control type, the values it accepts, its default, and the flat key or keys it writes. Use this to build an element from its own settings rather than a css block, so the client can adjust it in the builder afterwards. Each control lists keys (what to set on the element) and, where a control writes several at once, named_keys mapping a friendly name to its key — text-format, for instance, maps font_size to text_font_size. writes says whether a setting changes style, markup, or both. Pass search to narrow to matching controls ("font size", "flex", "text_font_family"). A tag control lists the tags it accepts (accepts.tags). emits says what the element\'s style template always outputs and the selector specificity Cornerstone writes it with (one generated class, 0,1,0), where the TSS source can be read; notes carry quirks such as the Section and Div clearfix under display grid or flex. format: "raw" returns Cornerstone\'s unprocessed definition instead, which is large.';
+        return 'Get the settings a Cornerstone element type has, grouped the way the builder\'s Inspector groups them: tab, panel, label, control type, the values it accepts, its default, and the flat key or keys it writes. Use this to build an element from its own settings rather than a css block, so the client can adjust it in the builder afterwards. Each control lists keys (what to set on the element) and, where a control writes several at once, named_keys mapping a friendly name to its key — text-format, for instance, maps font_size to text_font_size. writes says whether a setting changes style, markup, or both. Pass search to narrow to matching controls ("font size", "flex", "text_font_family"). A tag control lists the tags it accepts (accepts.tags). A control writing a font family or weight key carries font_reference: the family is a global font\'s bare _id ("body") and the weight "fw-normal" or "fw-bold". emits says what the element\'s style template always outputs and the selector specificity Cornerstone writes it with (one generated class, 0,1,0), where the TSS source can be read; notes carry quirks such as the Section and Div clearfix under display grid or flex. format: "raw" returns Cornerstone\'s unprocessed definition instead, which is large.';
     }
 
     public function inputSchema(): array
@@ -87,7 +87,7 @@ final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
             'group'          => (string) ($definition['group'] ?? ''),
             'valid_children' => $definition['options']['valid_children'] ?? [],
             'panels'         => $surface['panels'],
-            'controls'       => $surface['controls'],
+            'controls'       => self::withFontReferences($surface['controls']),
             'control_count'  => count($surface['controls']),
         ];
 
@@ -103,6 +103,42 @@ final class GetElementSchema implements ToolInterface, AnnotatedToolInterface
         $result += self::elementFacts($type);
 
         return $result;
+    }
+
+    /** What a font family or weight key holds, as Cornerstone resolves it (Settings\FontReferences). */
+    public const FONT_FAMILY_REFERENCE = 'A global font\'s bare _id, such as "body" (get_native_reference section "fonts" lists them), "inherit", or var(). Nothing before the _id: a prefixed value renders Cornerstone\'s fallback font.';
+    public const FONT_WEIGHT_REFERENCE = '"fw-normal" or "fw-bold" on its own: Cornerstone adds the family itself, so a value holding the family and a "|" renders inherit. "inherit", a number such as "700" (snapped to the closest weight the font has) or var() also work.';
+
+    /**
+     * Controls that write a font family or weight key, with what that key
+     * holds (font_reference: key => form), so a model reading the schema
+     * writes the form Cornerstone resolves.
+     *
+     * @param  array<int, array<string, mixed>> $controls
+     * @return array<int, array<string, mixed>>
+     */
+    public static function withFontReferences(array $controls): array
+    {
+        foreach ($controls as $n => $control) {
+            $references = [];
+
+            foreach ((array) ($control['keys'] ?? []) as $key) {
+                $key = (string) $key;
+                $base = str_ends_with($key, '_alt') ? substr($key, 0, -4) : $key;
+
+                if (str_ends_with($base, '_font_family')) {
+                    $references[$key] = self::FONT_FAMILY_REFERENCE;
+                } elseif (str_ends_with($base, '_font_weight')) {
+                    $references[$key] = self::FONT_WEIGHT_REFERENCE;
+                }
+            }
+
+            if ($references !== []) {
+                $controls[$n]['font_reference'] = $references;
+            }
+        }
+
+        return $controls;
     }
 
     /**

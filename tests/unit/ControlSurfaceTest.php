@@ -200,3 +200,18 @@ $longest = ControlSurface::cssProperties(ControlSurface::build(
     []
 ));
 T::same(['max-width' => 'box_max_width'], $longest, 'the longest property name wins over a shorter suffix');
+
+// Font reference hints on get_element_schema (1.5.1) -------------------------------
+
+T::group('GetElementSchema font references');
+
+$hinted = \ProExtended\Mcp\Tools\GetElementSchema::withFontReferences([
+    ['label' => 'Text', 'type' => 'text-format', 'keys' => ['text_font_family', 'text_font_weight', 'text_font_size']],
+    ['label' => 'Hover', 'type' => 'text-format', 'keys' => ['anchor_text_primary_font_family_alt']],
+    ['label' => 'Size', 'type' => 'unit', 'keys' => ['text_font_size']],
+]);
+T::same(['text_font_family', 'text_font_weight'], array_keys($hinted[0]['font_reference'] ?? []), 'a typography control names its family and weight keys');
+T::ok(str_contains($hinted[0]['font_reference']['text_font_family'], 'bare _id') && ! str_contains($hinted[0]['font_reference']['text_font_family'], 'global-ff:'), 'the family hint is the bare _id form');
+T::ok(str_contains($hinted[0]['font_reference']['text_font_weight'], '"fw-normal" or "fw-bold"') && ! str_contains($hinted[0]['font_reference']['text_font_weight'], 'global-fw:'), 'the weight hint is fw-normal or fw-bold');
+T::same(['anchor_text_primary_font_family_alt'], array_keys($hinted[1]['font_reference'] ?? []), 'an _alt key is hinted too');
+T::ok(! isset($hinted[2]['font_reference']), 'other controls are left as they are');

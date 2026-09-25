@@ -1,5 +1,7 @@
 # Element setting keys pe://guide/native cites, each confirmed in Cornerstone 7.9.4 or Cornerstone Forms source (file where the value is defined).
 text_content	includes/elements/values.php (text-standard, text-headline)
+text_font_family	includes/elements/values.php (_text, composed into text-standard and text-headline)
+text_font_weight	includes/elements/values.php (_text, composed into text-standard and text-headline)
 menu	includes/elements/values.php
 menu_active_links_highlight_current	includes/elements/values.php
 menu_active_links_highlight_ancestors	includes/elements/values.php

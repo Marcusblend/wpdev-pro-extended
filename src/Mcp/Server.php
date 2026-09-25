@@ -60,7 +60,7 @@ Pro Extended reads and writes Cornerstone (Pro theme) sites. Build everything wi
 
 Use the first of these that does the job:
 1. The element's own setting. get_element_schema lists the Inspector's controls and the key each one writes.
-2. A global reference in that setting: "global-color:<_id>" (with alpha "global-color:<_id>:0.5"), "global-ff:<_id>", "global-fw:<_id>|fw-normal", or a Global Variable as var(--name). Read ids with list_colors and list_fonts; add them with set_colors, set_fonts and set_variables. Self-hosted fonts: upload_media, then set_fonts with config.customFontItems.
+2. A global reference in that setting: a colour as "global-color:<_id>" (with alpha "global-color:<_id>:0.5"); a font as its bare _id in the family setting ("text_font_family": "body") with the weight on its own as "fw-normal" or "fw-bold" (Theme Options: x_body_font_family_selection "body", x_body_font_weight_selection "fw-normal"); or a Global Variable as var(--name). Read ids with list_colors and get_native_reference section "fonts"; add them with set_colors, set_fonts and set_variables. Self-hosted fonts: upload_media, then set_fonts with config.customFontItems (stack is the one quoted family, fallback the rest).
 3. Reuse: a component with parameters (list_components before composing instances). Site-wide values the client edits: Global Parameters (set_global_parameters).
 4. Data and logic: Dynamic Content tokens for data, Twig for arithmetic, dates and branching (get_site_info features.twig must be on). get_native_reference lists the tokens and the Twig functions and filters.
 5. Visibility: show conditions; assignments for headers, footers and single/archive layouts. get_native_reference lists the rules.
