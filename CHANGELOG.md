@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-10-12
+
+Checked against Cornerstone 7.9.5 and 7.9.6 (Pro 6.9.5, 6.9.6) and WordPress 7.1.3: the read-only smoke suite passes on all five installs, with no change needed for 7.9.5's deferred classic elements, lazy TSS tokens or WPML 5 language scopes. 47 tools.
+
+### Changed
+
+- **WordPress and PHP point releases no longer count as platform drift**: `get_platform_baseline` reports a WordPress or PHP version move with kind `environment` and leaves `drifted` false when nothing else changed. A host's 7.1.1 → 7.1.3 and PHP 8.4.25 → 8.4.26 update had marked every site as drifted. Cornerstone and Pro version moves, registry changes and migration bumps are still drift, and the summary names the environment change after them
+
+### Added
+
+- **`features.abilities` on `get_site_info`**: whether the WordPress Abilities API is available, how many abilities are registered by namespace (`core`, `yoast-seo`, `mcp-adapter`, …), and whether the WordPress MCP Adapter plugin is active, with its version. `wp pe doctor` prints the same as one line
+- **`pe://guide/native`**: where Yoast SEO has registered its abilities, the guide says to set SEO titles and descriptions through `yoast-seo/update-post-seo-data` via the MCP Adapter rather than by writing Yoast's post meta
+
 ## [1.5.2] - 2026-09-25
 
 Font ids that are not slugs. Font items made in older builders carry ids such as `"Hind Semi Bold"`, and 1.5.1 read only the first word of them. 47 tools. `wp pe warm` after deploying, as for 1.5.1.

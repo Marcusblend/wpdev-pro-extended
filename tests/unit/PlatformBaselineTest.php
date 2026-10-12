@@ -68,3 +68,27 @@ $newMigration['migrations']['table'] = 1;
 T::same(false, PlatformBaseline::diff($before, $newMigration)['drifted'], 'a migration for a type that is new is left to the element list to report');
 
 T::ok(str_contains(PlatformBaseline::summarize($diff['changes']), 'version'), 'the summary names what changed');
+
+// WordPress and PHP point releases (1.5.3) ------------------------------------
+
+$hostMoved = $before;
+$hostMoved['wordpress_version'] = '7.1.3';
+$hostMoved['php_version'] = '8.4.26';
+$hostDiff = PlatformBaseline::diff($before, $hostMoved);
+T::same(false, $hostDiff['drifted'], 'a WordPress or PHP version move alone is not drift');
+T::same(['environment', 'environment'], array_column($hostDiff['changes'], 'kind'), 'it is reported as environment');
+T::ok(str_starts_with(PlatformBaseline::summarize($hostDiff['changes']), 'No drift since the stored baseline.'), 'the summary says there is no drift');
+T::ok(str_contains(PlatformBaseline::summarize($hostDiff['changes']), 'wordpress_version ' . ($before['wordpress_version'] ?? 'none') . ' to 7.1.3'), 'and names the environment change');
+
+$both = $hostMoved;
+$both['cornerstone_version'] = '7.9.6';
+$bothDiff = PlatformBaseline::diff($before, $both);
+T::ok($bothDiff['drifted'], 'a Cornerstone version move is still drift');
+T::ok(str_contains(PlatformBaseline::summarize($bothDiff['changes']), 'version cornerstone_version (1)'), 'and leads the summary');
+
+// Ability names by namespace (get_site_info features.abilities) ---------------
+
+$summary = \ProExtended\Site\Features::abilitySummary(['yoast-seo/get-post-seo-data', 'core/get-site-info', 'yoast-seo/update-post-seo-data', 'core/get-site-info', '', 'orphan']);
+T::same(4, $summary['count'], 'abilities are counted once each, blanks dropped');
+T::same(['core' => 1, 'orphan' => 1, 'yoast-seo' => 2], $summary['namespaces'], 'and grouped by namespace');
+T::same('core/get-site-info', $summary['names'][0], 'names are sorted');

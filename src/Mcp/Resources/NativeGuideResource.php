@@ -170,6 +170,7 @@ The keys come from Cornerstone 7.9.4. Before you write one, confirm it on the si
 ### Structured data
 - **Need:** schema.org markup.
 - **Native:** the SEO plugin's settings for site, organization, breadcrumb and article schema. The Accordion's `accordion_faq_schema` covers FAQs. For anything else, such as a LocalBusiness with opening hours, one Raw Content element in the footer that reads Dynamic Content.
+- **Titles and descriptions:** where get_site_info `features.abilities.namespaces` includes yoast-seo, Yoast SEO has registered `yoast-seo/get-post-seo-data` and `yoast-seo/update-post-seo-data` with the WordPress Abilities API. Use those through the WordPress MCP Adapter (`features.abilities.mcp_adapter`) rather than writing Yoast's post meta.
 - **Write:**
   ```html
   <script type="application/ld+json">{"@context": "https://schema.org", "@type": "LocalBusiness", "name": {{dc:global:site_title type='json'}}, "url": {{dc:global:home_url type='json'}}, "telephone": {{dc:global:phone type='json'}}}</script>

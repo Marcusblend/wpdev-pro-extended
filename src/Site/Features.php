@@ -90,7 +90,74 @@ final class Features
             'acf'             => self::acf(),
             'max'             => self::max(),
             'permissions'     => self::permissions(),
+            'abilities'       => self::abilities(),
         ];
+    }
+
+    /**
+     * The WordPress Abilities API (core since 6.9) and the WordPress MCP
+     * Adapter plugin, which serves abilities to MCP clients. Plugins register
+     * their own abilities there; Yoast SEO, for one, registers abilities that
+     * read and write a post's SEO title and description.
+     *
+     * @return array{available: bool, count: int, namespaces: array<string, int>, names: string[], mcp_adapter: array{active: bool, version: ?string}}
+     */
+    public static function abilities(): array
+    {
+        $names = [];
+
+        if (function_exists('wp_get_abilities')) {
+            try {
+                foreach ((array) wp_get_abilities() as $key => $ability) {
+                    if (is_object($ability) && method_exists($ability, 'get_name')) {
+                        $names[] = (string) $ability->get_name();
+                    } elseif (is_string($key)) {
+                        $names[] = $key;
+                    }
+                }
+            } catch (\Throwable) {
+                $names = [];
+            }
+        }
+
+        $adapter = ['active' => false, 'version' => null];
+
+        if (! function_exists('get_plugins')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+
+        $active = array_map('strval', (array) get_option('active_plugins', []));
+
+        foreach (get_plugins() as $file => $plugin) {
+            if (str_starts_with((string) $file, 'mcp-adapter/')) {
+                $adapter = ['active' => in_array((string) $file, $active, true), 'version' => isset($plugin['Version']) ? (string) $plugin['Version'] : null];
+            }
+        }
+
+        return ['available' => function_exists('wp_get_abilities')] + self::abilitySummary($names) + ['mcp_adapter' => $adapter];
+    }
+
+    /**
+     * Count ability names by namespace ("yoast-seo/get-post-seo-data" is in
+     * "yoast-seo"). Pure, so it is unit-tested.
+     *
+     * @param  string[] $names
+     * @return array{count: int, namespaces: array<string, int>, names: string[]}
+     */
+    public static function abilitySummary(array $names): array
+    {
+        $names = array_values(array_unique(array_filter(array_map('strval', $names), static fn (string $n): bool => $n !== '')));
+        sort($names);
+        $namespaces = [];
+
+        foreach ($names as $name) {
+            $namespace = str_contains($name, '/') ? substr($name, 0, (int) strpos($name, '/')) : $name;
+            $namespaces[$namespace] = ($namespaces[$namespace] ?? 0) + 1;
+        }
+
+        ksort($namespaces);
+
+        return ['count' => count($names), 'namespaces' => $namespaces, 'names' => $names];
     }
 
     public static function twigEnabled(): bool
@@ -265,6 +332,24 @@ final class Features
         }
 
         $add('info', 'Integrations', $integrations === [] ? 'none of WPML, WooCommerce, ACF' : implode(', ', $integrations));
+
+        $abilities = (array) ($features['abilities'] ?? []);
+
+        if (! empty($abilities['available'])) {
+            $byNamespace = [];
+
+            foreach ((array) ($abilities['namespaces'] ?? []) as $namespace => $count) {
+                $byNamespace[] = $namespace . ' ' . (int) $count;
+            }
+
+            $adapter = (array) ($abilities['mcp_adapter'] ?? []);
+            $add('info', 'Abilities API', sprintf(
+                '%d abilities (%s); MCP Adapter %s',
+                (int) ($abilities['count'] ?? 0),
+                $byNamespace === [] ? 'none' : implode(', ', $byNamespace),
+                ! empty($adapter['active']) ? (string) ($adapter['version'] ?? 'active') : 'not active'
+            ));
+        }
 
         $max = (array) ($features['max'] ?? []);
         $active = array_column(array_filter((array) ($max['packages'] ?? []), static fn($p): bool => ! empty($p['active'])), 'title');

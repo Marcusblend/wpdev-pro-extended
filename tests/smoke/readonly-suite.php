@@ -53,7 +53,7 @@ S::check(isset($tools['get_theme_options']) && ($tools['get_theme_options']['ann
 S::check(array_filter($tools, static fn($t) => ! isset($t['annotations']['readOnlyHint'], $t['annotations']['title'], $t['title'])) === [], 'every tool has annotations and a title');
 
 $init = S::rpc('initialize', ['protocolVersion' => '2025-03-26', 'capabilities' => (object) [], 'clientInfo' => ['name' => 'pe-smoke', 'version' => '1']]);
-S::check(($init['result']['serverInfo']['version'] ?? null) === '1.5.2' && ($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'initialize reports 1.5.2 and protocol 2025-03-26');
+S::check(($init['result']['serverInfo']['version'] ?? null) === '1.5.3' && ($init['result']['protocolVersion'] ?? null) === '2025-03-26', 'initialize reports 1.5.3 and protocol 2025-03-26');
 S::check(pro_extended()->mcpServer()->getRegistrationErrors() === [], 'no tool failed to register');
 
 // 19. Site info and listings -------------------------------------------------
@@ -62,7 +62,7 @@ S::section('19 site info and listings');
 
 $info = S::ok(S::call('get_site_info'), 'get_site_info');
 $health = (array) ($info['health'] ?? []);
-S::check(($info['pro_extended']['version'] ?? null) === '1.5.2', 'reports 1.5.2');
+S::check(($info['pro_extended']['version'] ?? null) === '1.5.3', 'reports 1.5.3');
 S::check(isset($health['permalinks'], $health['cornerstone_adapter'], $health['component_registry'], $health['host_cache'], $health['settings']), 'returns the health block', (string) wp_json_encode(array_keys($health)));
 S::check(($health['cornerstone_available'] ?? null) === true, 'Cornerstone is available');
 S::check(($health['permalinks']['pretty'] ?? null) === true && ($health['application_passwords_in_use'] ?? null) === true, 'pretty permalinks and application passwords are in use');
@@ -316,7 +316,7 @@ S::section('21 site feature report');
 
 $features = (array) ($info['features'] ?? []);
 
-foreach (['content_storage', 'twig', 'external_api', 'csv', 'wpml', 'woocommerce', 'acf', 'max', 'permissions'] as $key) {
+foreach (['content_storage', 'twig', 'external_api', 'csv', 'wpml', 'woocommerce', 'acf', 'max', 'permissions', 'abilities'] as $key) {
     S::check(array_key_exists($key, $features), "features has {$key}");
 }
 
@@ -327,6 +327,13 @@ S::check(($features['woocommerce']['active'] ?? null) === class_exists('WooComme
 S::check(($features['permissions']['available'] ?? null) === true && in_array('content.page', (array) ($features['permissions']['allowed'] ?? []), true), 'the caller\'s Cornerstone permissions are reported', (string) wp_json_encode($features['permissions'] ?? null));
 S::check(preg_match('/^\d+_\d+$/', (string) ($info['breakpoints']['tag'] ?? '')) === 1, 'breakpoints report their tag', (string) ($info['breakpoints']['tag'] ?? ''));
 
+$abilities = (array) ($features['abilities'] ?? []);
+if (function_exists('wp_get_abilities')) {
+    S::check(($abilities['available'] ?? null) === true && ($abilities['count'] ?? null) === count((array) wp_get_abilities()), 'the Abilities API count matches wp_get_abilities()', (string) wp_json_encode(['count' => $abilities['count'] ?? null, 'namespaces' => $abilities['namespaces'] ?? null]));
+} else {
+    S::check(($abilities['available'] ?? null) === false, 'no Abilities API is reported on a site without one');
+}
+S::check(is_bool($abilities['mcp_adapter']['active'] ?? null), 'the MCP Adapter state is reported', (string) wp_json_encode($abilities['mcp_adapter'] ?? null));
 $maxJson = (string) wp_json_encode($features['max'] ?? null);
 S::check(is_int($features['max']['count'] ?? null) && ! str_contains($maxJson, '://') && ! str_contains($maxJson, '"package"') && ! str_contains($maxJson, '"edge"'), 'the Max summary has no package URLs', 'count ' . ($features['max']['count'] ?? 'null'));
 echo '      features: ' . wp_json_encode(['content_storage' => $features['content_storage'] ?? null, 'twig' => $features['twig']['enabled'] ?? null, 'external_api' => array_intersect_key((array) ($features['external_api'] ?? []), array_flip(['enabled', 'allowlist_empty', 'allowlist_entries', 'global_endpoints'])), 'max_active' => array_column(array_filter((array) ($features['max']['packages'] ?? []), static fn($p): bool => ! empty($p['active'])), 'slug')]) . "\n";

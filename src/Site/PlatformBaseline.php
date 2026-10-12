@@ -28,6 +28,14 @@ final class PlatformBaseline
     public const NATIVE_KEYS = ['twig_functions', 'twig_filters', 'twig_tests', 'condition_rules', 'looper_providers', 'parameter_types'];
 
     /**
+     * Versions the host moves on its own (WordPress and PHP point releases).
+     * A change is reported with kind "environment" but is not drift: drift is
+     * a change in what Cornerstone or Pro provide, and a host's WordPress or
+     * PHP update would otherwise mark every site as drifted every week.
+     */
+    public const ENVIRONMENT_KEYS = ['wordpress_version', 'php_version'];
+
+    /**
      * Compare two snapshots.
      *
      * @param  array<string, mixed>|null $before
@@ -47,7 +55,8 @@ final class PlatformBaseline
             $now = $after[$key] ?? null;
 
             if ($was !== $now) {
-                $changes[] = ['kind' => 'version', 'what' => $key, 'from' => $was, 'to' => $now];
+                $kind = in_array($key, self::ENVIRONMENT_KEYS, true) ? 'environment' : 'version';
+                $changes[] = ['kind' => $kind, 'what' => $key, 'from' => $was, 'to' => $now];
             }
         }
 
@@ -100,7 +109,23 @@ final class PlatformBaseline
             }
         }
 
-        return ['drifted' => $changes !== [], 'changes' => $changes];
+        return ['drifted' => self::drifted($changes), 'changes' => $changes];
+    }
+
+    /**
+     * Whether any change is more than a WordPress or PHP version move.
+     *
+     * @param array<int, array<string, mixed>> $changes
+     */
+    public static function drifted(array $changes): bool
+    {
+        foreach ($changes as $change) {
+            if (($change['kind'] ?? null) !== 'environment') {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -115,13 +140,25 @@ final class PlatformBaseline
         }
 
         $parts = [];
+        $environment = [];
 
         foreach ($changes as $change) {
+            if (($change['kind'] ?? null) === 'environment') {
+                $environment[] = sprintf('%s %s to %s', (string) $change['what'], (string) ($change['from'] ?? 'none'), (string) ($change['to'] ?? 'none'));
+                continue;
+            }
+
             $count = isset($change['items']) && is_array($change['items']) ? count($change['items']) : 1;
             $parts[] = sprintf('%s %s (%d)', (string) $change['kind'], (string) $change['what'], $count);
         }
 
-        return implode(', ', $parts);
+        $summary = $parts === [] ? 'No drift since the stored baseline.' : implode(', ', $parts);
+
+        if ($environment !== []) {
+            $summary .= ' Environment (not drift): ' . implode(', ', $environment) . '.';
+        }
+
+        return $summary;
     }
 
     /**
