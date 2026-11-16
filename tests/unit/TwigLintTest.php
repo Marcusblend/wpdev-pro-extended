@@ -51,6 +51,27 @@ T::same(['twig-off'], $codes($off->flat(['e1' => $el(['text_content' => '{{ post
 T::same([], $codes($off->tree([$el(['text_content' => 'Hello {{dc:post:title}}'])])), 'a token alone is not Twig, even with Twig off');
 T::same([], $codes($off->tree([$el(['text_content' => 'no braces at all'])])), 'plain text is quiet');
 
+// Cornerstone 7.9.8's cs_twig_renderer_enabled filter turns Twig off for the
+// whole site, independently of the theme option. Telling someone to set the
+// option when the filter is what is blocking them sends them to a switch that
+// cannot help.
+$byFilter = new ElementLint(new LintContext(
+    ['text' => 1], '4_4', [], [], null, null, null, null, false, null,
+    twigDisabledBy: 'renderer'
+));
+$issues = $byFilter->tree([$el(['text_content' => '{{ "now"|date("Y") }}'])]);
+T::same(['twig-off'], $codes($issues), 'Twig off by the renderer filter is still reported');
+T::ok(str_contains($issues[0]['message'], 'cs_twig_renderer_enabled'), 'and the filter is named');
+T::ok(! str_contains($issues[0]['message'], 'update_theme_options'), 'without advising the option, which cannot override it');
+
+$byOption = new ElementLint(new LintContext(
+    ['text' => 1], '4_4', [], [], null, null, null, null, false, null,
+    twigDisabledBy: 'option'
+));
+$issues = $byOption->tree([$el(['text_content' => '{{ "now"|date("Y") }}'])]);
+T::ok(str_contains($issues[0]['message'], 'cs_twig_enabled'), 'the option case still names the option');
+T::ok(! str_contains($issues[0]['message'], 'cs_twig_renderer_enabled'), 'and not the filter');
+
 $unknown = new ElementLint(new LintContext(['text' => 1], '4_4'));
 T::same([], $codes($unknown->tree([$el(['text_content' => '{% if %}'])])), 'with Twig\'s state unknown, nothing is reported');
 

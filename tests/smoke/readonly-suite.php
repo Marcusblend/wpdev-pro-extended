@@ -323,6 +323,8 @@ foreach (['content_storage', 'twig', 'external_api', 'csv', 'wpml', 'woocommerce
 S::check(! array_key_exists('features', $health), 'features are not repeated in the health block');
 S::check(($features['content_storage']['mode'] ?? null) === (get_option('cs_document_build_as_html', true) ? 'html' : 'shortcodes'), 'content_storage matches the site option', (string) wp_json_encode($features['content_storage'] ?? null));
 S::check(is_bool($features['twig']['enabled'] ?? null) && is_bool($features['external_api']['enabled'] ?? null) && is_bool($features['csv']['enabled'] ?? null), 'the switches are booleans');
+S::check(is_bool($features['twig']['renderer_enabled'] ?? null) && is_bool($features['twig']['usable'] ?? null), 'twig reports the 7.9.8 renderer filter and whether Twig is usable');
+S::check(($features['twig']['usable'] ?? null) === (($features['twig']['enabled'] ?? false) && ($features['twig']['renderer_enabled'] ?? false)), 'usable is the option and the filter together');
 S::check(($features['woocommerce']['active'] ?? null) === class_exists('WooCommerce') && ($features['wpml']['active'] ?? null) === class_exists('SitePress') && ($features['acf']['active'] ?? null) === class_exists('ACF'), 'the integrations match the loaded plugins');
 S::check(($features['permissions']['available'] ?? null) === true && in_array('content.page', (array) ($features['permissions']['allowed'] ?? []), true), 'the caller\'s Cornerstone permissions are reported', (string) wp_json_encode($features['permissions'] ?? null));
 S::check(preg_match('/^\d+_\d+$/', (string) ($info['breakpoints']['tag'] ?? '')) === 1, 'breakpoints report their tag', (string) ($info['breakpoints']['tag'] ?? ''));
@@ -496,6 +498,7 @@ foreach ($sections as $section) {
 $legacy = S::ok(S::call('list_dynamic_content', ['groups_only' => true]), 'list_dynamic_content still answers');
 S::check(($reference['dynamic_content']['group_count'] ?? null) === ($legacy['group_count'] ?? null), 'dynamic_content matches the deprecated alias', (string) ($legacy['group_count'] ?? '?'));
 S::check(is_bool($reference['twig']['enabled'] ?? null) && is_array($reference['twig']['toggles'] ?? null), 'twig reports the switch and its toggles');
+S::check(is_bool($reference['twig']['renderer_enabled'] ?? null) && is_bool($reference['twig']['usable'] ?? null), 'and the renderer filter alongside the option');
 S::check(($reference['twig']['toggles']['cs_twig_extension_advanced']['writable'] ?? null) === false, 'the Advanced toggle is reported as not writable');
 
 if (($reference['twig']['enabled'] ?? false) === true) {

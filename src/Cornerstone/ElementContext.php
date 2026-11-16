@@ -201,15 +201,29 @@ final class ElementContext
      * Cornerstone cannot build it, twig-syntax is skipped rather than failing
      * the validation.
      *
-     * @return array{twigEnabled: bool|null, twigParser: (\Closure(string): ?string)|null}
+     * @return array{twigEnabled: bool|null, twigParser: (\Closure(string): ?string)|null, twigDisabledBy: ?string}
      */
     private function twigLintContext(): array
     {
         try {
-            $enabled = \ProExtended\Site\Features::twigEnabled();
+            // Both switches decide whether a Twig string renders: the
+            // cs_twig_enabled option, and the cs_twig_renderer_enabled filter
+            // Cornerstone 7.9.8 added. Judging on the option alone called Twig
+            // live on a site whose renderer was filtered off, and the lint went
+            // quiet exactly where it was needed.
+            $option = \ProExtended\Site\Features::twigEnabled();
+            $renderer = \ProExtended\Site\Features::twigRendererEnabled();
         } catch (\Throwable) {
-            return ['twigEnabled' => null, 'twigParser' => null];
+            return ['twigEnabled' => null, 'twigParser' => null, 'twigDisabledBy' => null];
         }
+
+        $enabled = $option && $renderer;
+
+        $disabledBy = match (true) {
+            ! $option   => 'option',
+            ! $renderer => 'renderer',
+            default     => null,
+        };
 
         try {
             $parser = $enabled ? TwigCatalog::parser() : null;
@@ -217,7 +231,7 @@ final class ElementContext
             $parser = null;
         }
 
-        return ['twigEnabled' => $enabled, 'twigParser' => $parser];
+        return ['twigEnabled' => $enabled, 'twigParser' => $parser, 'twigDisabledBy' => $disabledBy];
     }
 
     /**

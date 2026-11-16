@@ -77,8 +77,10 @@ final class Features
                 'stored' => self::optionExists('cs_document_build_as_html'),
             ],
             'twig'            => [
-                'available' => version_compare(PHP_VERSION, '8.1', '>='),
-                'enabled'   => self::twigEnabled(),
+                'available'        => version_compare(PHP_VERSION, '8.1', '>='),
+                'enabled'          => self::twigEnabled(),
+                'renderer_enabled' => self::twigRendererEnabled(),
+                'usable'           => self::twigUsable(),
             ],
             'external_api'    => self::externalApi(),
             'csv'             => ['enabled' => self::csvEnabled()],
@@ -135,6 +137,36 @@ final class Features
         }
 
         return ['available' => function_exists('wp_get_abilities')] + self::abilitySummary($names) + ['mcp_adapter' => $adapter];
+    }
+
+    /**
+     * Whether Cornerstone's Twig renderer is switched on.
+     *
+     * Cornerstone 7.9.8 added `cs_twig_renderer_enabled`, a filter that turns
+     * Twig off outright. It is independent of the `cs_twig_enabled` theme
+     * option: a site can have the option on and the renderer filtered off, and
+     * then every Twig string prints literally while the option still reads
+     * true. Reporting only the option would call Twig available on a site where
+     * it cannot render.
+     *
+     * The filter's default is true, so on Cornerstone before 7.9.8 — where
+     * nothing listens — this reads as enabled.
+     */
+    public static function twigRendererEnabled(): bool
+    {
+        return (bool) apply_filters('cs_twig_renderer_enabled', true);
+    }
+
+    /**
+     * Whether a Twig string written now would actually render.
+     *
+     * Both switches have to be on. This is what callers want to know; the two
+     * underlying values are reported separately so the answer says which one is
+     * in the way.
+     */
+    public static function twigUsable(): bool
+    {
+        return self::twigEnabled() && self::twigRendererEnabled();
     }
 
     /**
