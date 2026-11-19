@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.5.4] - 2026-11-19
+
+Checked against the Cornerstone 7.9.7 and 7.9.8 (Pro 6.9.7, 6.9.8) release notes. 7.9.7's HTTP Status code conditions and extra Section separators need no change: conditions resolve through `ConditionRules` and the `cs_condition_rule_*` filters, and separators come through the element's own control surface. Neither has been exercised on a 7.9.8 install yet, nor have the new reporting fields below — the read-only smoke suite covers them and wants a run.
+
+7.9.7 also tightened the CSV looper to http and https only, which would suit a lint, but the looper lint reads no URL key and Themeco's docs describe that provider's UI without naming the key its source is stored under. The key has to come from Cornerstone's source or from `get_element_schema` on a live site; a lint on a guessed key would be dead code that reads as coverage, so there is none.
+
+### Added
+
+- **Cornerstone 7.9.8's Twig kill switch is reported and respected.** 7.9.8 added `cs_twig_renderer_enabled`, a filter that turns Twig off for the whole site independently of the `cs_twig_enabled` theme option. The plugin read only the option, so a site with the option on and the renderer filtered off reported Twig as available, built an environment for it, and kept the `twig-off` lint quiet — while every Twig string on the site printed literally. `get_site_info` and `get_native_reference` now report `renderer_enabled` and `usable` beside `enabled`, and the `twig-off` warning names whichever switch is in the way: advising `update_theme_options {"cs_twig_enabled": true}` is wrong when a filter is blocking it, because the option cannot override the filter
+
+### Fixed
+
+- **`literal-color` missed Cornerstone's legacy colour functions.** 7.9.0 restored support for `alpha()` and friends, so a setting written as `alpha(#1a73e8, 0.4)` is a hard-coded colour like any hex — it is now reported as one rather than passing as a reference
+
 ## [1.5.3] - 2026-10-12
 
 Checked against Cornerstone 7.9.5 and 7.9.6 (Pro 6.9.5, 6.9.6) and WordPress 7.1.3: the read-only smoke suite passes on all five installs, with no change needed for 7.9.5's deferred classic elements, lazy TSS tokens or WPML 5 language scopes. 47 tools.

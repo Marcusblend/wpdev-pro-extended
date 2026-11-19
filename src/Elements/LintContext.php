@@ -18,6 +18,7 @@ final class LintContext
      *                                                              csv, external_api, woocommerce. A missing key is not checked.
      * @param (\Closure(string): ?bool)|null     $conditionExists   Whether a condition rule name resolves; null when unknown.
      * @param (\Closure(string): ?bool)|null     $looperExists      Whether a looper provider type is registered; null when unknown.
+     * @param ?string                            $twigDisabledBy    Which switch turned Twig off: 'option', 'renderer', or null.
      * @param (\Closure(string): array<string, string>)|null $cssProperties CSS property => the element key that sets it.
      * @param (\Closure(string): array<string, string>)|null $styleKeys     Element key => the CSS property it sets.
      * @param bool|null                          $twigEnabled       Whether Twig is on (cs_twig_enabled); null when unknown.
@@ -44,5 +45,6 @@ final class LintContext
         public readonly ?\Closure $twigParser = null,
         public readonly ?\Closure $shortcodeSource = null,
         public readonly ?\Closure $fontIds = null,
+        public readonly ?string $twigDisabledBy = null,
     ) {}
 }

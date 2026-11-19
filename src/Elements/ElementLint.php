@@ -69,7 +69,7 @@ final class ElementLint
      */
     public const TWIG_CODES = [
         'twig-syntax' => 'A string holds Twig that does not parse with the site\'s Twig environment; on the live site Cornerstone prints the raw template instead.',
-        'twig-off'    => 'A string holds Twig syntax but Twig is off on this site (cs_twig_enabled), so it prints literally.',
+        'twig-off'    => 'A string holds Twig syntax but Twig is off on this site — either the cs_twig_enabled option or the cs_twig_renderer_enabled filter — so it prints literally.',
     ];
 
     /** What a missing _m changes, by type. */
@@ -338,10 +338,15 @@ final class ElementLint
             }
 
             if ($this->context->twigEnabled === false) {
+                $remedy = $this->context->twigDisabledBy === 'renderer'
+                    ? 'The cs_twig_renderer_enabled filter is turning Twig off for the whole site, so the theme option cannot switch it back on — remove that filter, or use Dynamic Content.'
+                    : 'Switch it on with update_theme_options {"cs_twig_enabled": true}, or use Dynamic Content.';
+
                 $add('twig-off', sprintf(
-                    '%s holds Twig ("%s") but Twig is off on this site, so it prints literally. Switch it on with update_theme_options {"cs_twig_enabled": true}, or use Dynamic Content.',
+                    '%s holds Twig ("%s") but Twig is off on this site, so it prints literally. %s',
                     $key,
-                    \ProExtended\Cornerstone\TwigSyntax::excerpt($value)
+                    \ProExtended\Cornerstone\TwigSyntax::excerpt($value),
+                    $remedy
                 ));
                 continue;
             }
@@ -1202,8 +1207,11 @@ final class ElementLint
      */
     private static function isLiteralColor(string $value): bool
     {
+        // alpha() and the other legacy Cornerstone colour functions became
+        // supported again in 7.9.0, so a value written with one is a literal
+        // colour like any other.
         return preg_match('/^#[0-9a-f]{3,8}$/i', $value) === 1
-            || preg_match('/^(rgba?|hsla?)\s*\(/i', $value) === 1;
+            || preg_match('/^(rgba?|hsla?|alpha|tint|shade)\s*\(/i', $value) === 1;
     }
 
     // ─── Native-first steering (1.5) ─────────────────────────────────────────

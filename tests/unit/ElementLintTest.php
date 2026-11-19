@@ -183,6 +183,9 @@ $seen['literal-font-family'] = true;
 $rgba = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_bg_color' => 'rgba(0, 0, 0, 0.4)'];
 T::same(['literal-color'], $codesOf($withKeys->tree([$rgba])), 'an rgba background is a literal too');
 
+$legacy = ['_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4', 'text_text_color' => 'alpha(#1a73e8, 0.4)'];
+T::same(['literal-color'], $codesOf($withKeys->tree([$legacy])), 'so is a legacy alpha() colour, supported again since 7.9.0');
+
 $referenced = [
     '_type' => 'headline', '_m' => ['e' => 1], '_bp_base' => '4_4',
     'text_text_color'  => 'global-color:brand',

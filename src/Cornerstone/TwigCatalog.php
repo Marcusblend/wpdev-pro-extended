@@ -221,6 +221,13 @@ final class TwigCatalog
             return [null, 'Twig is off (cs_twig_enabled), so Cornerstone never builds its environment. Switch it on with update_theme_options {"cs_twig_enabled": true}.'];
         }
 
+        // Cornerstone 7.9.8 added cs_twig_renderer_enabled, which turns Twig
+        // off whatever the option says. Reporting the option's advice here
+        // would send the caller to a switch that cannot override the filter.
+        if (! Features::twigRendererEnabled()) {
+            return [null, 'Twig is switched on in Theme Options, but the cs_twig_renderer_enabled filter is turning the renderer off for the whole site. Remove that filter, or use Dynamic Content instead.'];
+        }
+
         if (! function_exists('cs_twig_environment')) {
             return [null, 'Twig is switched on, but Cornerstone\'s Twig integration is not loaded (it needs PHP 8.1 or later).'];
         }
@@ -300,6 +307,11 @@ final class TwigCatalog
 
         $result = [
             'enabled' => Features::twigEnabled(),
+            // The option and the 7.9.8 renderer filter are separate switches,
+            // so both are reported: `usable` is the one a caller should read
+            // before writing Twig.
+            'renderer_enabled' => Features::twigRendererEnabled(),
+            'usable' => Features::twigUsable(),
             'toggles' => $toggles ?? ['unavailable' => $togglesError ?? 'Theme Options could not be read.'],
             'write_with' => 'update_theme_options, e.g. {"cs_twig_enabled": true, "cs_twig_extension_wordpress": true}',
         ];
