@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Checked against the Cornerstone 7.9.7 and 7.9.8 (Pro 6.9.7, 6.9.8) release notes. 7.9.7's HTTP Status code conditions and extra Section separators need no change: conditions resolve through `ConditionRules` and the `cs_condition_rule_*` filters, and separators come through the element's own control surface — both still want confirming on a 7.9.8 install.
+## [1.5.4] - 2026-11-19
+
+Checked against the Cornerstone 7.9.7 and 7.9.8 (Pro 6.9.7, 6.9.8) release notes. 7.9.7's HTTP Status code conditions and extra Section separators need no change: conditions resolve through `ConditionRules` and the `cs_condition_rule_*` filters, and separators come through the element's own control surface. Neither has been exercised on a 7.9.8 install yet, nor have the new reporting fields below — the read-only smoke suite covers them and wants a run.
+
+7.9.7 also tightened the CSV looper to http and https only, which would suit a lint, but the looper lint reads no URL key and Themeco's docs describe that provider's UI without naming the key its source is stored under. The key has to come from Cornerstone's source or from `get_element_schema` on a live site; a lint on a guessed key would be dead code that reads as coverage, so there is none.
 
 ### Added
 
